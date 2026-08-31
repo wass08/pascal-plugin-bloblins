@@ -1,8 +1,11 @@
+import { useScene } from '@pascal-app/core'
+
 /**
- * TODO(integration): detect viewer/published read-only hosts so the sim runs
- * transiently there without ever writing scene state (SPEC.md "Published
- * scenes"). Until then the plugin only ships in the editor context.
+ * Published/shared viewers mount the same systems as the editor but flip the
+ * scene store's `readOnly` flag (the store also self-guards its mutations).
+ * The sim keeps running transiently on read-only hosts — pets stay alive for
+ * visitors — but every scene write is skipped.
  */
 export function isReadOnlyHost(): boolean {
-  return false
+  return useScene.getState().readOnly
 }

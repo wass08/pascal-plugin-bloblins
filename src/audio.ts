@@ -1,89 +1,352 @@
-import type { Mood } from './store'
+/**
+ * Pet voices, 100% synthesized — no audio assets anywhere. Modelled on
+ * `@pascal-app/plugin-boots/src/game/audio.ts`: one lazily created,
+ * SSR-guarded AudioContext behind master gain → compressor → lowpass, and
+ * fire-and-forget voices whose envelope gains free themselves, so nothing
+ * needs cleanup.
+ *
+ * A creature voice is 2–4 short blips with a pitch bend inside each blip;
+ * mood picks the intervals (hungry descends in a minor shape, ecstatic is a
+ * fast major arpeggio, sleepy is slow/low/soft, grumpy is a buzzy square
+ * pair, content is a cheerful two-note) and the genome's timbre + a small
+ * random detune per call keep repeats from sounding identical.
+ *
+ * Every sound passes a per-name rate limiter: a roomful of pets chirping on
+ * their own cadences can never machine-gun the mixer.
+ */
 
-// STUB — see SPEC.md `audio.ts`. Boots-style procedural synth
-// (node_modules/@pascal-app/plugin-boots/src/game/audio.ts is the reference
-// engine); this stub only proves the voice path with simple blips.
+import type { Mood } from './store'
 
 type Voice = { basePitchHz: number; timbre: 'sine' | 'triangle' | 'square' }
 
 let ctx: AudioContext | null = null
 let master: GainNode | null = null
+let noiseBuffer: AudioBuffer | null = null
+let masterVolume = 0.35
 
 function ensureContext(): AudioContext | null {
   if (typeof window === 'undefined') return null
-  const Ctor =
-    window.AudioContext ??
-    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-  if (!Ctor) return null
   if (!ctx) {
-    ctx = new Ctor()
-    master = ctx.createGain()
-    master.gain.value = 0.35
-    master.connect(ctx.destination)
+    const Ctor =
+      window.AudioContext ??
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!Ctor) return null
+    const created = new Ctor()
+    const gain = created.createGain()
+    gain.gain.value = masterVolume
+    const compressor = created.createDynamicsCompressor()
+    compressor.threshold.value = -16
+    compressor.ratio.value = 10
+    compressor.attack.value = 0.003
+    compressor.release.value = 0.14
+    const lowpass = created.createBiquadFilter()
+    lowpass.type = 'lowpass'
+    lowpass.frequency.value = 9000
+    lowpass.Q.value = 0.6
+    gain.connect(compressor)
+    compressor.connect(lowpass)
+    lowpass.connect(created.destination)
+    ctx = created
+    master = gain
   }
   if (ctx.state === 'suspended') void ctx.resume()
   return ctx
 }
 
 export function setMasterVolume(v: number): void {
-  if (master) master.gain.value = Math.min(1, Math.max(0, v))
+  masterVolume = Math.min(1, Math.max(0, v))
+  if (master) master.gain.value = masterVolume
 }
 
-function blip(freqHz: number, durSec: number, startInSec = 0, type: OscillatorType = 'sine'): void {
-  const ac = ensureContext()
-  if (!(ac && master)) return
-  const t0 = ac.currentTime + startInSec
-  const osc = ac.createOscillator()
-  const gain = ac.createGain()
-  osc.type = type
-  osc.frequency.setValueAtTime(freqHz, t0)
-  gain.gain.setValueAtTime(0, t0)
-  gain.gain.linearRampToValueAtTime(0.5, t0 + 0.01)
-  gain.gain.exponentialRampToValueAtTime(0.001, t0 + durSec)
-  osc.connect(gain)
-  gain.connect(master)
-  osc.start(t0)
-  osc.stop(t0 + durSec + 0.02)
+function noise(c: AudioContext): AudioBuffer {
+  if (noiseBuffer) return noiseBuffer
+  const buffer = c.createBuffer(1, c.sampleRate, c.sampleRate)
+  const data = buffer.getChannelData(0)
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1
+  noiseBuffer = buffer
+  return buffer
+}
+
+/**
+ * Minimum gap between two plays of the same sound, whoever asks for it —
+ * pets vocalize on independent timers and several can land on the same
+ * frame. Returns true when the call should be dropped.
+ */
+const lastPlayedAt = new Map<string, number>()
+
+function rateLimited(name: string, minMs: number): boolean {
+  const now = typeof performance === 'undefined' ? Date.now() : performance.now()
+  const previous = lastPlayedAt.get(name)
+  if (previous !== undefined && now - previous < minMs) return true
+  lastPlayedAt.set(name, now)
+  return false
+}
+
+type ToneOptions = {
+  freq: number
+  /** Bend target: the blip ramps here across its duration. */
+  freqEnd?: number
+  duration: number
+  gain: number
+  type?: OscillatorType
+  delay?: number
+  attack?: number
+}
+
+/** Enveloped oscillator through a soft lowpass — the voice workhorse. */
+function tone(o: ToneOptions): void {
+  const c = ensureContext()
+  if (!(c && master)) return
+  const t = c.currentTime + (o.delay ?? 0)
+  const osc = c.createOscillator()
+  osc.type = o.type ?? 'sine'
+  osc.frequency.setValueAtTime(o.freq, t)
+  if (o.freqEnd) {
+    osc.frequency.exponentialRampToValueAtTime(Math.max(24, o.freqEnd), t + o.duration)
+  }
+  const soften = c.createBiquadFilter()
+  soften.type = 'lowpass'
+  soften.frequency.value = Math.min(11_000, Math.max(600, o.freq * 5))
+  soften.Q.value = 0.7
+  const env = c.createGain()
+  const attack = o.attack ?? 0.01
+  env.gain.setValueAtTime(0.0001, t)
+  env.gain.exponentialRampToValueAtTime(Math.max(0.0005, o.gain), t + attack)
+  env.gain.exponentialRampToValueAtTime(0.0001, t + o.duration)
+  osc.connect(soften)
+  soften.connect(env)
+  env.connect(master)
+  osc.start(t)
+  osc.stop(t + o.duration + 0.04)
+}
+
+type BurstOptions = {
+  duration: number
+  gain: number
+  freq?: number
+  freqEnd?: number
+  q?: number
+  filterType?: BiquadFilterType
+  delay?: number
+}
+
+/** Enveloped noise through a filter — crunches, sparkles, ticks. */
+function burst(o: BurstOptions): void {
+  const c = ensureContext()
+  if (!(c && master)) return
+  const t = c.currentTime + (o.delay ?? 0)
+  const src = c.createBufferSource()
+  src.buffer = noise(c)
+  src.loop = true
+  const filter = c.createBiquadFilter()
+  filter.type = o.filterType ?? 'bandpass'
+  filter.frequency.setValueAtTime(o.freq ?? 1200, t)
+  if (o.freqEnd) filter.frequency.exponentialRampToValueAtTime(o.freqEnd, t + o.duration)
+  filter.Q.value = o.q ?? 1
+  const env = c.createGain()
+  env.gain.setValueAtTime(o.gain, t)
+  env.gain.exponentialRampToValueAtTime(0.0001, t + o.duration)
+  src.connect(filter)
+  filter.connect(env)
+  env.connect(master)
+  src.start(t)
+  src.stop(t + o.duration + 0.05)
+}
+
+type Blip = {
+  /** Multiple of the pet's base pitch. */
+  ratio: number
+  /** Bend across the blip, as a multiple of the blip's own pitch. */
+  bend: number
+  duration: number
+  gain: number
+  gap: number
+}
+
+const CHIRPS: Record<Mood, { blips: Blip[]; square?: boolean }> = {
+  // Plaintive descent — a minor third down, then another step.
+  hungry: {
+    blips: [
+      { bend: 0.93, duration: 0.16, gain: 0.22, gap: 0.17, ratio: 1 },
+      { bend: 0.92, duration: 0.17, gain: 0.2, gap: 0.18, ratio: 0.841 },
+      { bend: 0.88, duration: 0.22, gain: 0.17, gap: 0, ratio: 0.749 },
+    ],
+  },
+  // Fast major arpeggio, bending up — pure delight.
+  ecstatic: {
+    blips: [
+      { bend: 1.05, duration: 0.075, gain: 0.2, gap: 0.066, ratio: 1 },
+      { bend: 1.05, duration: 0.075, gain: 0.2, gap: 0.066, ratio: 1.26 },
+      { bend: 1.05, duration: 0.075, gain: 0.2, gap: 0.066, ratio: 1.5 },
+      { bend: 1.06, duration: 0.13, gain: 0.19, gap: 0, ratio: 2 },
+    ],
+  },
+  // Low, slow, soft — a pet talking in its sleep.
+  sleepy: {
+    blips: [
+      { bend: 0.9, duration: 0.34, gain: 0.12, gap: 0.3, ratio: 0.55 },
+      { bend: 0.86, duration: 0.42, gain: 0.1, gap: 0, ratio: 0.5 },
+    ],
+  },
+  // Buzzy square pair, barely moving — a proper grumble.
+  grumpy: {
+    blips: [
+      { bend: 0.97, duration: 0.11, gain: 0.17, gap: 0.13, ratio: 0.72 },
+      { bend: 0.95, duration: 0.14, gain: 0.16, gap: 0, ratio: 0.68 },
+    ],
+    square: true,
+  },
+  // A questioning "where are you" — up, then a longer fall.
+  lonely: {
+    blips: [
+      { bend: 1.06, duration: 0.14, gain: 0.16, gap: 0.15, ratio: 0.95 },
+      { bend: 1.04, duration: 0.13, gain: 0.16, gap: 0.16, ratio: 1.18 },
+      { bend: 0.86, duration: 0.26, gain: 0.14, gap: 0, ratio: 0.9 },
+    ],
+  },
+  // Cheerful two-note hello.
+  content: {
+    blips: [
+      { bend: 1.04, duration: 0.1, gain: 0.2, gap: 0.11, ratio: 1 },
+      { bend: 1.05, duration: 0.15, gain: 0.19, gap: 0, ratio: 1.335 },
+    ],
+  },
 }
 
 export function petChirp(voice: Voice, mood: Mood): void {
-  const f = voice.basePitchHz
-  if (mood === 'hungry') {
-    blip(f, 0.12, 0, voice.timbre)
-    blip(f * 0.8, 0.18, 0.14, voice.timbre)
-  } else if (mood === 'sleepy') {
-    blip(f * 0.6, 0.3, 0, voice.timbre)
-  } else if (mood === 'grumpy') {
-    blip(f * 0.7, 0.1, 0, 'square')
-    blip(f * 0.7, 0.1, 0.12, 'square')
-  } else {
-    blip(f, 0.09, 0, voice.timbre)
-    blip(f * 1.25, 0.09, 0.1, voice.timbre)
-    if (mood === 'ecstatic') blip(f * 1.5, 0.12, 0.2, voice.timbre)
+  if (rateLimited('chirp', 200)) return
+  const shape = CHIRPS[mood]
+  const detune = 1 + (Math.random() - 0.5) * 0.055
+  const base = voice.basePitchHz * detune
+  const type = shape.square ? 'square' : voice.timbre
+  let at = 0
+  for (const blip of shape.blips) {
+    const freq = base * blip.ratio * (1 + (Math.random() - 0.5) * 0.02)
+    tone({
+      attack: 0.012,
+      delay: at,
+      duration: blip.duration,
+      freq,
+      freqEnd: freq * blip.bend,
+      gain: blip.gain,
+      type,
+    })
+    at += blip.gap
   }
 }
 
+/** ~1s low wobbly triangle — the LFO on the envelope gain is the purr. */
 export function petPurr(voice: Voice): void {
-  blip(voice.basePitchHz * 0.5, 0.25, 0, 'triangle')
-  blip(voice.basePitchHz * 0.55, 0.25, 0.2, 'triangle')
+  if (rateLimited('purr', 320)) return
+  const c = ensureContext()
+  if (!(c && master)) return
+  const t = c.currentTime
+  const freq = Math.max(46, voice.basePitchHz * 0.22) * (1 + (Math.random() - 0.5) * 0.06)
+  const osc = c.createOscillator()
+  osc.type = 'triangle'
+  osc.frequency.setValueAtTime(freq, t)
+  osc.frequency.linearRampToValueAtTime(freq * 1.08, t + 0.5)
+  osc.frequency.linearRampToValueAtTime(freq * 0.95, t + 1)
+  const lowpass = c.createBiquadFilter()
+  lowpass.type = 'lowpass'
+  lowpass.frequency.value = 720
+  lowpass.Q.value = 0.7
+  const env = c.createGain()
+  env.gain.setValueAtTime(0.0001, t)
+  env.gain.exponentialRampToValueAtTime(0.24, t + 0.14)
+  env.gain.setValueAtTime(0.24, t + 0.72)
+  env.gain.exponentialRampToValueAtTime(0.0001, t + 1.05)
+  const lfo = c.createOscillator()
+  lfo.type = 'sine'
+  lfo.frequency.value = 23 + Math.random() * 4
+  const lfoDepth = c.createGain()
+  lfoDepth.gain.value = 0.11
+  lfo.connect(lfoDepth)
+  lfoDepth.connect(env.gain)
+  osc.connect(lowpass)
+  lowpass.connect(env)
+  env.connect(master)
+  osc.start(t)
+  lfo.start(t)
+  osc.stop(t + 1.1)
+  lfo.stop(t + 1.1)
+  osc.onended = () => {
+    env.disconnect()
+    lfoDepth.disconnect()
+  }
 }
 
+/** Three filtered noise crunches with a little jaw thud under each. */
 export function munch(): void {
-  blip(160, 0.06, 0, 'square')
-  blip(140, 0.06, 0.09, 'square')
-  blip(150, 0.06, 0.18, 'square')
+  if (rateLimited('munch', 110)) return
+  let at = 0
+  for (let i = 0; i < 3; i++) {
+    burst({
+      delay: at,
+      duration: 0.06,
+      freq: 520 + Math.random() * 380,
+      freqEnd: 230,
+      gain: 0.22 - i * 0.035,
+      q: 1.4,
+    })
+    tone({
+      delay: at,
+      duration: 0.05,
+      freq: 130 + Math.random() * 40,
+      freqEnd: 82,
+      gain: 0.08,
+      type: 'triangle',
+    })
+    at += 0.085 + Math.random() * 0.035
+  }
 }
 
+/** Ascending arpeggio plus a sparkle tail — the egg just cracked open. */
 export function hatchFanfare(): void {
-  blip(523, 0.1, 0)
-  blip(659, 0.1, 0.1)
-  blip(784, 0.2, 0.2)
+  if (rateLimited('hatch', 400)) return
+  burst({ duration: 0.07, freq: 900, freqEnd: 2600, gain: 0.24, q: 1.2 })
+  const notes = [523.25, 659.25, 783.99, 1046.5]
+  notes.forEach((freq, i) => {
+    tone({
+      delay: 0.04 + i * 0.085,
+      duration: 0.17,
+      freq,
+      freqEnd: freq * 1.01,
+      gain: 0.2,
+      type: 'triangle',
+    })
+  })
+  tone({ delay: 0.36, duration: 0.4, freq: 1318.5, freqEnd: 1330, gain: 0.15 })
+  for (let i = 0; i < 4; i++) {
+    burst({
+      delay: 0.3 + i * 0.055,
+      duration: 0.05,
+      freq: 4200 + Math.random() * 3200,
+      gain: 0.09,
+      q: 6,
+    })
+  }
 }
 
+/** Pitch-bent pop — the scoop lifting a dropping off the floor. */
 export function scoopPop(): void {
-  blip(880, 0.05, 0, 'triangle')
+  if (rateLimited('scoop', 90)) return
+  const v = 1 + (Math.random() - 0.5) * 0.12
+  tone({ attack: 0.004, duration: 0.1, freq: 760 * v, freqEnd: 170 * v, gain: 0.26 })
+  burst({ duration: 0.035, freq: 1800 * v, gain: 0.11, q: 2 })
 }
 
+/** Muffled knock from inside the shell as the egg rocks. */
 export function eggWiggleTick(): void {
-  blip(300, 0.04, 0, 'triangle')
+  if (rateLimited('wiggle', 140)) return
+  const v = 1 + (Math.random() - 0.5) * 0.14
+  tone({
+    attack: 0.005,
+    duration: 0.05,
+    freq: 210 * v,
+    freqEnd: 150 * v,
+    gain: 0.11,
+    type: 'triangle',
+  })
+  burst({ duration: 0.03, freq: 900 * v, gain: 0.06, q: 1.6 })
 }

@@ -1,48 +1,112 @@
-import { EAR_TYPES, PATTERNS, PetGenome, TAIL_TYPES } from './schema'
+import { PetGenome } from './schema'
 
-// STUB — see SPEC.md `genome.ts`. Signatures are the contract; the real
-// implementation weights aesthetics (pastels, mostly round bodies, rare
-// oddball ears) and adds proper per-gene mixing/mutation.
+const CONTINUOUS_GENES = [
+  'bodyRoundness',
+  'bodySize',
+  'headRatio',
+  'earSize',
+  'eyeSize',
+  'eyeSpacing',
+  'limbLength',
+  'hue',
+  'accentHue',
+  'saturation',
+  'voicePitch',
+] as const satisfies readonly (keyof PetGenome)[]
 
-function pick<T>(arr: readonly T[], rng: () => number): T {
-  return arr[Math.min(arr.length - 1, Math.floor(rng() * arr.length))] as T
+const clamp01 = (value: number): number => Math.min(1, Math.max(0, value))
+
+function weightedPick<T>(entries: readonly (readonly [T, number])[], rng: () => number): T {
+  const total = entries.reduce((sum, entry) => sum + entry[1], 0)
+  let cursor = rng() * total
+  for (const [value, weight] of entries) {
+    cursor -= weight
+    if (cursor < 0) return value
+  }
+  return entries[entries.length - 1]![0]
+}
+
+function centered(rng: () => number): number {
+  return (rng() + rng() + rng()) / 3
 }
 
 export function randomGenome(rng: () => number = Math.random): PetGenome {
   return PetGenome.parse({
     seed: Math.floor(rng() * 2 ** 31),
-    bodyRoundness: rng(),
-    bodySize: rng(),
-    headRatio: rng(),
-    earType: pick(EAR_TYPES, rng),
-    earSize: rng(),
-    tailType: pick(TAIL_TYPES, rng),
-    eyeSize: rng(),
-    eyeSpacing: rng(),
-    limbLength: rng(),
+    bodyRoundness: 0.48 + Math.sqrt(rng()) * 0.52,
+    bodySize: 0.15 + centered(rng) * 0.7,
+    headRatio: 0.42 + centered(rng) * 0.46,
+    earType: weightedPick(
+      [
+        ['none', 5],
+        ['nub', 20],
+        ['cat', 28],
+        ['bunny', 22],
+        ['floppy', 20],
+        ['antenna', 5],
+      ] as const,
+      rng,
+    ),
+    earSize: 0.2 + centered(rng) * 0.65,
+    tailType: weightedPick(
+      [
+        ['none', 8],
+        ['stub', 22],
+        ['curl', 30],
+        ['puff', 22],
+        ['long', 18],
+      ] as const,
+      rng,
+    ),
+    eyeSize: 0.45 + centered(rng) * 0.5,
+    eyeSpacing: 0.25 + centered(rng) * 0.55,
+    limbLength: centered(rng) * 0.65,
     hue: rng(),
     accentHue: rng(),
     saturation: 0.35 + rng() * 0.4,
-    pattern: pick(PATTERNS, rng),
-    voicePitch: rng(),
+    pattern: weightedPick(
+      [
+        ['solid', 24],
+        ['belly', 34],
+        ['spots', 25],
+        ['stripes', 17],
+      ] as const,
+      rng,
+    ),
+    voicePitch: centered(rng),
   })
 }
 
 export function mixGenomes(a: PetGenome, b: PetGenome, rng: () => number = Math.random): PetGenome {
-  const out: Record<string, unknown> = {}
-  for (const key of Object.keys(PetGenome.shape) as (keyof PetGenome)[]) {
-    out[key] = rng() < 0.5 ? a[key] : b[key]
+  const mixed = {
+    ...a,
+    earType: rng() < 0.5 ? a.earType : b.earType,
+    tailType: rng() < 0.5 ? a.tailType : b.tailType,
+    pattern: rng() < 0.5 ? a.pattern : b.pattern,
   }
-  out.seed = Math.floor(rng() * 2 ** 31)
-  return PetGenome.parse(out)
+
+  for (const gene of CONTINUOUS_GENES) {
+    let value = rng() < 0.5 ? a[gene] : b[gene]
+    if (rng() < 0.3) value = (a[gene] + b[gene]) / 2
+    if (rng() < 0.08) value += (rng() * 2 - 1) * 0.1
+    mixed[gene] = clamp01(value)
+  }
+
+  mixed.seed = Math.floor(rng() * 2 ** 31)
+  while (mixed.seed === a.seed || mixed.seed === b.seed) {
+    mixed.seed = (mixed.seed + 1) % 2 ** 31
+  }
+  return PetGenome.parse(mixed)
 }
 
 export function genomeColors(g: PetGenome): { body: string; accent: string; eye: string } {
-  const sat = Math.round(g.saturation * 100)
+  const saturation = Math.round(clamp01(g.saturation) * 100)
+  const bodyLightness = Math.round(62 + clamp01(g.bodyRoundness) * 6)
+  const accentLightness = Math.min(86, bodyLightness + 13)
   return {
-    body: `hsl(${Math.round(g.hue * 360)}, ${sat}%, 65%)`,
-    accent: `hsl(${Math.round(g.accentHue * 360)}, ${sat}%, 80%)`,
-    eye: '#26221f',
+    body: `hsl(${Math.round(clamp01(g.hue) * 360)}, ${saturation}%, ${bodyLightness}%)`,
+    accent: `hsl(${Math.round(clamp01(g.accentHue) * 360)}, ${saturation}%, ${accentLightness}%)`,
+    eye: 'hsl(25, 12%, 12%)',
   }
 }
 
@@ -50,6 +114,7 @@ export function voiceOf(g: PetGenome): {
   basePitchHz: number
   timbre: 'sine' | 'triangle' | 'square'
 } {
-  const pitch01 = Math.min(1, Math.max(0, g.voicePitch * 0.7 + (1 - g.bodySize) * 0.3))
-  return { basePitchHz: 220 * 2 ** (pitch01 * 2), timbre: 'sine' }
+  const pitch = clamp01(g.voicePitch * 0.7 + (1 - g.bodySize) * 0.3)
+  const timbre = g.pattern === 'stripes' ? 'square' : g.pattern === 'spots' ? 'triangle' : 'sine'
+  return { basePitchHz: 220 * 4 ** pitch, timbre }
 }
