@@ -70,6 +70,8 @@ export const BowlNode = BaseNode.extend({
   rotation: vec3.default([0, 0, 0]),
   /** 0 = empty, 1 = full. Fill via E / panel; pets eat it down. */
   food: z.number().min(0).max(1).default(1),
+  /** Feed-button plates: once eaten empty, the sim clears them away. */
+  ephemeral: z.boolean().default(false),
 })
 export type BowlNode = z.infer<typeof BowlNode>
 

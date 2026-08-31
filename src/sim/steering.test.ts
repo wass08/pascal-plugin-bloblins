@@ -14,6 +14,7 @@ function runtime(pos: [number, number], heading: number): PetRuntime {
     emoteUntil: 0,
     lastVocalAt: 0,
     lastSongAt: 0,
+    lastNapAt: 0,
     singingUntil: 0,
     lastPatAt: 0,
   }

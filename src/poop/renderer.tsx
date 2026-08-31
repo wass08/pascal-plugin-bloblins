@@ -6,6 +6,7 @@ import { useFrame } from '@react-three/fiber'
 import { useRef } from 'react'
 import { type Group, MeshStandardMaterial } from 'three'
 import { UNIT_CONE, UNIT_SPHERE, UNIT_TORUS } from '../body/primitives'
+import { scoopPoop } from '../interaction'
 import type { PoopNode } from '../schema'
 
 const POOP_MATERIAL = new MeshStandardMaterial({ color: '#6b4a2a', roughness: 0.95 })
@@ -44,7 +45,15 @@ export default function PoopRenderer({ node }: { node: PoopNode }) {
   const scale = 0.6 + node.size * 0.4
   return (
     <group position={node.position} ref={ref} rotation={node.rotation} scale={scale} {...handlers}>
-      <group ref={wobble}>
+      <group
+        onClick={(e) => {
+          // Click = scoop, right on the offending object — cleaning should
+          // feel like doing something, not pressing a panel button.
+          e.stopPropagation()
+          scoopPoop(node.id)
+        }}
+        ref={wobble}
+      >
         <mesh
           castShadow
           geometry={UNIT_SPHERE}

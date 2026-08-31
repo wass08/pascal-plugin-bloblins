@@ -168,6 +168,19 @@ function buildWorlds(nodes: Record<string, AnyNode>): Map<string, LevelWorld> {
 
 const cameraWorld = new Vector3()
 
+/** Eaten-empty Feed plates scheduled for removal (plate id → epoch ms). */
+const plateCleanupAt = new Map<string, number>()
+
+function scenePosOf(
+  scene: ReturnType<typeof useScene.getState>,
+  id: string,
+): [number, number] | null {
+  const node = scene.nodes[id as AnyNodeId] as unknown as
+    | { position?: [number, number, number] }
+    | undefined
+  return node?.position ? [node.position[0], node.position[2]] : null
+}
+
 /**
  * The Pets simulation loop — mounted once per scene while the plugin is
  * installed (def.system). Per frame: steering. ~1 Hz per pet: behavior.
@@ -181,6 +194,7 @@ export default function PetsSystem() {
   const lastCommitAt = useRef(Date.now())
   const behaviorAt = useRef(new Map<string, number>())
   const prevHomes = useRef(new Map<string, [number, number]>())
+  const prevSelected = useRef(new Set<string>())
 
   // One-time real-time catch-up for stats accrued while the project was
   // closed, committed in a single batch.
@@ -224,6 +238,8 @@ export default function PetsSystem() {
     // demand (camera is world-space; pets live in level-local coordinates).
     const walkthrough = useViewer.getState().walkthroughMode
     if (walkthrough) cameraWorld.copy(state.camera.position)
+
+    const selectedIds = new Set(useViewer.getState().selection.selectedIds as readonly string[])
 
     for (const node of Object.values(scene.nodes)) {
       if ((node as { type?: string }).type !== 'pets:pet') continue
@@ -270,6 +286,33 @@ export default function PetsSystem() {
         }
       }
 
+      // A selected pet sits still with its node position snapped to where it
+      // actually stands, so the move gizmo grabs the pet, not the stale home
+      // anchor it wandered away from.
+      const selected = selectedIds.has(pet.id)
+      if (selected) {
+        if (!prevSelected.current.has(pet.id)) {
+          prevSelected.current.add(pet.id)
+          if (!readOnly && Math.hypot(rt.pos[0] - home[0], rt.pos[1] - home[1]) > 0.02) {
+            prevHomes.current.set(pet.id, [rt.pos[0], rt.pos[1]])
+            scene.updateNode(
+              pet.id as AnyNodeId,
+              {
+                position: [rt.pos[0], pet.position[1], rt.pos[1]],
+              } as never,
+            )
+          }
+        }
+        rt.activity = 'idle'
+        rt.targetId = null
+        rt.speed = 0
+        continue
+      }
+      if (prevSelected.current.has(pet.id)) {
+        prevSelected.current.delete(pet.id)
+        rt.activityUntil = now
+      }
+
       const world = worlds.current.get(levelId) ?? {
         walls: [],
         obstacles: [],
@@ -282,6 +325,7 @@ export default function PetsSystem() {
       const nextBehaviorAt = behaviorAt.current.get(pet.id) ?? 0
       if (now >= nextBehaviorAt) {
         behaviorAt.current.set(pet.id, now + BEHAVIOR_EVERY_MS * (0.8 + Math.random() * 0.4))
+        const wasNapping = rt.activity === 'nap'
         runBehavior(
           pet,
           rt,
@@ -291,6 +335,18 @@ export default function PetsSystem() {
           scene,
           readOnly,
         )
+        // Waking from a nap restores energy and restarts the cat-nap clock.
+        if (wasNapping && rt.activity !== 'nap') {
+          rt.lastNapAt = now
+          if (!readOnly) {
+            scene.updateNode(
+              pet.id as AnyNodeId,
+              {
+                energy: Math.min(1, pet.energy + 0.25),
+              } as never,
+            )
+          }
+        }
       }
 
       // Per-frame steering against this level's walls and furniture, minus
@@ -308,10 +364,12 @@ export default function PetsSystem() {
         }
         return best
       }
+      // Fresh Feed plates can be seconds younger than the cached world —
+      // fall through to the live scene node so the pet heads there at once.
       const target = rt.targetId
         ? (world.bowls.find((b) => b.id === rt.targetId)?.pos ??
           world.furniture.find((f) => f.id === rt.targetId)?.pos ??
-          null)
+          scenePosOf(scene, rt.targetId))
         : rt.activity === 'follow' && walkthrough
           ? levelLocalCamera(levelId)
           : null
@@ -332,6 +390,16 @@ export default function PetsSystem() {
     // Prune runtimes of deleted pets.
     for (const id of petRuntimes.keys()) {
       if (!scene.nodes[id as AnyNodeId]) petRuntimes.delete(id)
+    }
+
+    // Eaten-empty Feed plates linger a beat so the emptiness registers, then
+    // get cleared away.
+    if (!readOnly) {
+      for (const [plateId, dueAt] of plateCleanupAt) {
+        if (now < dueAt) continue
+        plateCleanupAt.delete(plateId)
+        if (scene.nodes[plateId as AnyNodeId]) scene.deleteNode(plateId as AnyNodeId)
+      }
     }
 
     if (!readOnly && now - lastCommitAt.current > COMMIT_EVERY_MS) {
@@ -360,10 +428,22 @@ function runBehavior(
   readOnly: boolean,
 ): void {
   const stage = lifeStageOf(pet, now)
+  // A Feed plate spawned seconds ago may predate the cached world snapshot —
+  // splice the live node in so behavior can seek and arrive immediately.
+  let bowls = world.bowls
+  if (rt.targetId && !bowls.some((b) => b.id === rt.targetId)) {
+    const fresh = scene.nodes[rt.targetId as AnyNodeId] as unknown as BowlNode | undefined
+    if (fresh?.type === 'pets:bowl') {
+      bowls = [
+        ...bowls,
+        { id: fresh.id, pos: [fresh.position[0], fresh.position[2]], food: fresh.food },
+      ]
+    }
+  }
   const distToTarget = (() => {
     if (!rt.targetId) return null
     const t =
-      world.bowls.find((b) => b.id === rt.targetId)?.pos ??
+      bowls.find((b) => b.id === rt.targetId)?.pos ??
       world.furniture.find((f) => f.id === rt.targetId)?.pos
     return t ? Math.hypot(t[0] - rt.pos[0], t[1] - rt.pos[1]) : null
   })()
@@ -371,7 +451,7 @@ function runBehavior(
     now,
     stats: pet,
     stage,
-    bowls: world.bowls,
+    bowls,
     furniture: world.furniture,
     followTarget:
       followTarget &&
@@ -395,8 +475,11 @@ function runBehavior(
   if (out.eatFromBowlId && !readOnly) {
     const bowl = scene.nodes[out.eatFromBowlId as AnyNodeId] as unknown as BowlNode | undefined
     if (bowl) {
-      const bite = Math.min(bowl.food, 0.34)
-      scene.updateNode(out.eatFromBowlId as AnyNodeId, { food: bowl.food - bite } as never)
+      // Feed plates are single servings — eaten clean in one meal.
+      const bite = bowl.ephemeral ? bowl.food : Math.min(bowl.food, 0.34)
+      const left = bowl.food - bite
+      scene.updateNode(out.eatFromBowlId as AnyNodeId, { food: left } as never)
+      if (bowl.ephemeral && left <= 0.05) plateCleanupAt.set(bowl.id, now + 4000)
       scene.updateNode(
         pet.id as AnyNodeId,
         {

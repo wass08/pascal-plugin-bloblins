@@ -36,6 +36,8 @@ export type PetRuntime = {
   lastVocalAt: number
   /** last time this pet performed its song; songs are rare set-pieces */
   lastSongAt: number
+  /** last time a nap ended — drives the visible cat-nap cadence */
+  lastNapAt: number
   /** epoch ms until which the pet is mid-song — drives the dance sway */
   singingUntil: number
   /** transient pat feedback: epoch ms of the last pat, drives squash + hearts */
@@ -58,6 +60,9 @@ export function ensureRuntime(id: string, home: [number, number]): PetRuntime {
       emoteUntil: 0,
       lastVocalAt: 0,
       lastSongAt: 0,
+      // Seeded to now so the first visible cat-nap lands after one cadence,
+      // not the moment the pet loads.
+      lastNapAt: Date.now(),
       singingUntil: 0,
       lastPatAt: 0,
     }

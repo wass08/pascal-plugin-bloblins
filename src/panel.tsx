@@ -11,7 +11,7 @@ import { useShallow } from 'zustand/shallow'
 import type { BodyPart, BodyPartColor } from './body/body-spec'
 import { buildBodySpec } from './body/build-body'
 import { genomeColors, PET_CREAM, PET_LEAF, randomGenome } from './genome'
-import { fillBowl, patPet, scoopPoop } from './interaction'
+import { feedPet, patPet } from './interaction'
 import { randomPetName } from './names'
 import {
   BODY_SHAPES,
@@ -43,9 +43,6 @@ const runAsOneHistoryStep = <T,>(run: () => T): T => {
 /** Poop this far (m) from a pet's anchor is what soils ITS hygiene — droppings
  * across the house are somebody else's problem. */
 const HYGIENE_RADIUS_M = 6
-/** Where a panel-placed bowl lands relative to the pet's anchor. */
-const BOWL_OFFSET_M = 0.6
-
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
 
 const MOOD_EMOJI: Record<Mood, string> = {
@@ -102,15 +99,12 @@ function RowButton({
 }
 
 function PetRow({
-  bowlId,
   now,
   pet,
   poops,
   renaming,
   setRenaming,
 }: {
-  /** Nearest bowl to this pet, or null when the scene has none. */
-  bowlId: string | null
   now: number
   pet: PetNode
   poops: PoopNode[]
@@ -184,19 +178,13 @@ function PetRow({
         <RowButton disabled={stage === 'egg'} onClick={() => patPet(pet.id)}>
           Pat
         </RowButton>
-        {bowlId ? (
-          <RowButton
-            disabled={stage === 'egg'}
-            onClick={() => fillBowl(bowlId)}
-            title="Fills the nearest bowl — hungry pets walk over to eat"
-          >
-            Feed
-          </RowButton>
-        ) : (
-          <RowButton onClick={() => placeBowlNear(pet)} title="Drops a bowl beside this pet">
-            Place bowl
-          </RowButton>
-        )}
+        <RowButton
+          disabled={stage === 'egg'}
+          onClick={() => feedPet(pet.id)}
+          title="Sets a plate of food down in front of this pet"
+        >
+          Feed
+        </RowButton>
         <RowButton
           onClick={() => useViewer.getState().setSelection({ selectedIds: [pet.id as AnyNodeId] })}
         >
@@ -218,31 +206,12 @@ function hatchCountdown(pet: PetNode, now: number): string {
   return left > 0 ? `Hatches in ${Math.ceil(left / 1000)}s` : 'Hatching…'
 }
 
-/**
- * Drop a bowl beside a pet. `pets:bowl` carries no `def.tool`, so there is no
- * placement cursor to arm — the panel writes the node itself, into the pet's
- * own level so the two share a coordinate frame.
- */
-function placeBowlNear(pet: PetNode): void {
-  const parentId = (pet.parentId ?? useViewer.getState().selection.levelId) as AnyNodeId | null
-  if (!parentId) return
-  const bowl = BowlNode.parse({
-    position: [pet.position[0] + BOWL_OFFSET_M, 0, pet.position[2]],
-    rotation: [0, 0, 0],
-  })
-  useScene.getState().createNode(bowl as unknown as AnyNode, parentId)
-  useViewer.getState().setSelection({ selectedIds: [bowl.id as AnyNodeId] })
-  triggerSFX('sfx:item-place')
-}
-
 function RosterTab({
-  bowls,
   now,
   onHatch,
   pets,
   poops,
 }: {
-  bowls: BowlNode[]
   now: number
   onHatch: () => void
   pets: PetNode[]
@@ -271,21 +240,13 @@ function RosterTab({
   return (
     <div className="flex flex-col gap-2">
       {poops.length > 0 && (
-        <button
-          className="rounded-full border border-sidebar-border/60 px-3 py-1.5 text-xs transition-colors hover:bg-sidebar-accent"
-          onClick={() =>
-            runAsOneHistoryStep(() => {
-              for (const poop of poops) scoopPoop(poop.id)
-            })
-          }
-          type="button"
-        >
-          Scoop {poops.length} dropping{poops.length === 1 ? '' : 's'}
-        </button>
+        <p className="rounded-lg border border-sidebar-border/60 border-dashed px-3 py-2 text-[11px] text-sidebar-foreground/60 leading-relaxed">
+          💩 {poops.length} dropping{poops.length === 1 ? '' : 's'} to clean — click{' '}
+          {poops.length === 1 ? 'it' : 'them'} in the scene to scoop.
+        </p>
       )}
       {pets.map((pet) => (
         <PetRow
-          bowlId={nearestBowlId(pet, bowls)}
           key={pet.id}
           now={now}
           pet={pet}
@@ -296,19 +257,6 @@ function RosterTab({
       ))}
     </div>
   )
-}
-
-function nearestBowlId(pet: PetNode, bowls: BowlNode[]): string | null {
-  let best: string | null = null
-  let bestDist = Number.POSITIVE_INFINITY
-  for (const bowl of bowls) {
-    const dist = distanceXZ(bowl.position, pet.position)
-    if (dist < bestDist) {
-      bestDist = dist
-      best = bowl.id
-    }
-  }
-  return best
 }
 
 // ── Hatch builder ───────────────────────────────────────────────────────────
@@ -691,16 +639,14 @@ export default function PetsPanel() {
   const simTick = usePets((s) => s.simTick)
   const [uiTick, setUiTick] = useState(0)
 
-  const { bowls, pets, poops } = useMemo(() => {
+  const { pets, poops } = useMemo(() => {
     const pets: PetNode[] = []
-    const bowls: BowlNode[] = []
     const poops: PoopNode[] = []
     for (const node of petsNodes) {
       if (node.type === 'pets:pet') pets.push(node as unknown as PetNode)
-      else if (node.type === 'pets:bowl') bowls.push(node as unknown as BowlNode)
       else if (node.type === 'pets:poop') poops.push(node as unknown as PoopNode)
     }
-    return { bowls, pets, poops }
+    return { pets, poops }
   }, [petsNodes])
 
   const [tab, setTab] = useState<Tab>(() => (pets.length > 0 ? 'roster' : 'hatch'))
@@ -716,7 +662,7 @@ export default function PetsPanel() {
   const now = useMemo(() => Date.now(), [simTick, uiTick])
 
   return (
-    <div className="flex flex-col gap-4 p-4 text-sidebar-foreground">
+    <div className="flex h-full flex-col gap-4 overflow-y-auto p-4 pb-10 text-sidebar-foreground">
       <header className="flex flex-col gap-1">
         <div className="flex items-center gap-2">
           <h2 className="font-semibold text-base">Pets</h2>
@@ -739,13 +685,7 @@ export default function PetsPanel() {
       />
 
       {tab === 'roster' ? (
-        <RosterTab
-          bowls={bowls}
-          now={now}
-          onHatch={() => setTab('hatch')}
-          pets={pets}
-          poops={poops}
-        />
+        <RosterTab now={now} onHatch={() => setTab('hatch')} pets={pets} poops={poops} />
       ) : (
         <HatchTab />
       )}

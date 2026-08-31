@@ -19,6 +19,7 @@ export const bowlDefinition: NodeDefinition<typeof BowlNode> & Record<string, un
     position: [0, 0, 0],
     rotation: [0, 0, 0],
     food: 1,
+    ephemeral: false,
   }),
   capabilities: {
     movable: { axes: ['x', 'z'], gridSnap: true },

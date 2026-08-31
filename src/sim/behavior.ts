@@ -123,6 +123,20 @@ export function stepBehavior(rt: PetRuntime, ctx: BehaviorContext): BehaviorResu
     return result(ctx, 'follow', ctx.now + 1000, null, ctx.followTarget, 'music')
   }
 
+  // A pet already walking to food finishes the trip even when it isn't
+  // hungry — a served treat (the Feed plate) is never left standing.
+  if (rt.activity === 'seek-bowl' && rt.targetId && ctx.now < rt.activityUntil) {
+    const served = ctx.bowls.find(
+      (candidate) => candidate.id === rt.targetId && candidate.food > 0.05,
+    )
+    if (served) {
+      if (ctx.distToTarget != null && ctx.distToTarget <= ARRIVE_DIST) {
+        return result(ctx, 'eating', ctx.now + 4000, served.id, served.pos, 'food')
+      }
+      return result(ctx, 'seek-bowl', rt.activityUntil, served.id, served.pos, 'food')
+    }
+  }
+
   if (ctx.stats.fullness < 0.35) {
     const currentBowl = ctx.bowls.find(
       (candidate) => candidate.id === rt.targetId && candidate.food > 0.05,
@@ -150,7 +164,10 @@ export function stepBehavior(rt: PetRuntime, ctx: BehaviorContext): BehaviorResu
     return result(ctx, 'nap', rt.activityUntil, rt.targetId, null, 'zzz')
   }
 
-  if (ctx.stats.energy < 0.2) {
+  // Naps happen for real reasons (energy) but also on a visible cat-nap
+  // cadence — a pet that never sleeps doesn't read as alive.
+  const napDue = ctx.now - rt.lastNapAt > 8 * 60_000 + ctx.rng() * 7 * 60_000
+  if (ctx.stats.energy < 0.2 || napDue) {
     const nearbyFurniture = ctx.furniture.filter(
       (candidate) => distanceSquared(candidate.pos, ctx.home) <= 8 * 8,
     )
