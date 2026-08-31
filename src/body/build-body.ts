@@ -1,4 +1,4 @@
-import type { PetGenome } from '../schema'
+import { PetGenome } from '../schema'
 import type { BodyPart, BodySpec } from './body-spec'
 
 const clamp01 = (value: number): number => Math.min(1, Math.max(0, value))
@@ -44,7 +44,10 @@ const HALF_HEIGHT: Record<BodyPart['kind'], number> = {
  * Deterministic per (genome, growth): the only randomness is seeded off
  * `g.seed` for spot placement.
  */
-export function buildBodySpec(g: PetGenome, growth: number): BodySpec {
+export function buildBodySpec(rawGenome: PetGenome, growth: number): BodySpec {
+  // Pets saved before a gene existed load without it — parse restores the
+  // schema defaults so old creatures keep rendering after upgrades.
+  const g = PetGenome.parse(rawGenome ?? {})
   const grow = clamp01(growth)
   // Babies are the same creature scaled down — and, like every good toy,
   // proportionally bigger-eyed.
