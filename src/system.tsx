@@ -134,7 +134,7 @@ export default function PetsSystem() {
     if (isReadOnlyHost()) return
     const now = Date.now()
     const scene = useScene.getState()
-    const updates: { id: AnyNodeId; changes: Partial<PetNode> }[] = []
+    const updates: { id: AnyNodeId; data: Partial<PetNode> }[] = []
     for (const node of Object.values(scene.nodes)) {
       if ((node as { type?: string }).type !== 'pets:pet') continue
       const pet = node as unknown as PetNode
@@ -143,7 +143,7 @@ export default function PetsSystem() {
       if (elapsed < COMMIT_EVERY_MS) continue
       updates.push({
         id: pet.id as AnyNodeId,
-        changes: { ...catchUpStats(pet, elapsed), lastSimAt: now },
+        data: { ...catchUpStats(pet, elapsed), lastSimAt: now },
       })
     }
     if (updates.length > 0) {
@@ -356,7 +356,7 @@ function commitStats(): void {
   if (isReadOnlyHost()) return
   const now = Date.now()
   const scene = useScene.getState()
-  const updates: { id: AnyNodeId; changes: Partial<PetNode> }[] = []
+  const updates: { id: AnyNodeId; data: Partial<PetNode> }[] = []
   for (const node of Object.values(scene.nodes)) {
     if ((node as { type?: string }).type !== 'pets:pet') continue
     const pet = node as unknown as PetNode
@@ -365,7 +365,7 @@ function commitStats(): void {
     if (since <= 0) continue
     updates.push({
       id: pet.id as AnyNodeId,
-      changes: { ...catchUpStats(pet, since), lastSimAt: now },
+      data: { ...catchUpStats(pet, since), lastSimAt: now },
     })
   }
   if (updates.length > 0) {
