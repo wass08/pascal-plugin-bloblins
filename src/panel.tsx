@@ -347,12 +347,22 @@ function partColor(role: BodyPartColor, colors: ReturnType<typeof genomeColors>)
   return colors.body
 }
 
-function PreviewCreature({ genome }: { genome: PetGenome }) {
+/** Shared between the drag handlers (DOM) and the turntable (R3F frame loop). */
+type PreviewControl = { angle: number; auto: boolean }
+
+function PreviewCreature({
+  control,
+  genome,
+}: {
+  control: React.MutableRefObject<PreviewControl>
+  genome: PetGenome
+}) {
   const spec = useMemo(() => buildBodySpec(genome, 1), [genome])
   const colors = useMemo(() => genomeColors(genome), [genome])
   const turntable = useRef<Group>(null)
   useFrame((_, delta) => {
-    if (turntable.current) turntable.current.rotation.y += delta * 0.5
+    if (control.current.auto) control.current.angle += delta * 0.5
+    if (turntable.current) turntable.current.rotation.y = control.current.angle
   })
   // Normalize height to 1 unit so a tiny genome and a huge one both fill the
   // same frame; the inner group then straddles the origin.
@@ -482,6 +492,9 @@ function HatchTab() {
   const draftName = usePets((s) => s.draftName)
   // R3F cannot render on the server; mount the preview after hydration.
   const [mounted, setMounted] = useState(false)
+  const control = useRef<PreviewControl>({ angle: 0, auto: true })
+  const [autoRotate, setAutoRotate] = useState(true)
+  const drag = useRef<{ active: boolean; lastX: number }>({ active: false, lastX: 0 })
   useEffect(() => {
     setMounted(true)
     // 'Pip' is the store's placeholder, not a choice anyone made — roll a real
@@ -489,9 +502,35 @@ function HatchTab() {
     if (usePets.getState().draftName === 'Pip') usePets.getState().setDraftName(randomPetName())
   }, [])
 
+  const stopAuto = () => {
+    control.current.auto = false
+    setAutoRotate(false)
+  }
+
   return (
     <div className="flex flex-col gap-3">
-      <div className="aspect-square w-full overflow-hidden rounded-xl border border-sidebar-border/60 bg-sidebar-accent/40">
+      <div
+        className="relative aspect-square w-full cursor-grab touch-none overflow-hidden rounded-xl border border-sidebar-border/60 bg-sidebar-accent/40 active:cursor-grabbing"
+        onDoubleClick={() => {
+          control.current.angle = 0
+          stopAuto()
+        }}
+        onPointerDown={(e) => {
+          drag.current = { active: true, lastX: e.clientX }
+          e.currentTarget.setPointerCapture(e.pointerId)
+        }}
+        onPointerMove={(e) => {
+          if (!drag.current.active) return
+          const dx = e.clientX - drag.current.lastX
+          if (dx !== 0 && control.current.auto) stopAuto()
+          control.current.angle += dx * 0.012
+          drag.current.lastX = e.clientX
+        }}
+        onPointerUp={() => {
+          drag.current.active = false
+        }}
+        title="Drag to rotate · double-click to face front"
+      >
         {mounted && (
           <Canvas
             camera={{ fov: 32, position: [0, 0.5, 2.4] }}
@@ -502,9 +541,21 @@ function HatchTab() {
             <ambientLight intensity={1.2} />
             <directionalLight intensity={2} position={[2.5, 4, 3]} />
             <directionalLight intensity={0.5} position={[-3, 1.5, -2]} />
-            <PreviewCreature genome={genome} />
+            <PreviewCreature control={control} genome={genome} />
           </Canvas>
         )}
+        <button
+          className={`absolute right-1.5 bottom-1.5 rounded-full border border-sidebar-border/60 bg-sidebar/80 px-2 py-0.5 text-[10px] backdrop-blur transition-colors hover:bg-sidebar-accent ${autoRotate ? 'text-sidebar-foreground' : 'text-sidebar-foreground/40'}`}
+          onClick={() => {
+            control.current.auto = !control.current.auto
+            setAutoRotate(control.current.auto)
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          title={autoRotate ? 'Stop auto-rotate' : 'Start auto-rotate'}
+          type="button"
+        >
+          {autoRotate ? '⟳ auto' : '⟳ off'}
+        </button>
       </div>
 
       <div className="flex items-center gap-1.5">

@@ -274,7 +274,9 @@ export default function PetRenderer({ node }: { node: PetNode }) {
 
     // Idle flourishes: every several seconds a loitering pet does something
     // small and finite. Transient by construction — one enum in a ref.
-    const loitering = rt == null || rt.activity === 'idle' || rt.activity === 'wander'
+    const loitering =
+      (rt == null || rt.activity === 'idle' || rt.activity === 'wander') &&
+      (rt == null || now >= rt.singingUntil)
     if (a.flourish == null && loitering && !napping && now > a.nextFlourishAt) {
       a.flourish = FLOURISHES[Math.floor(Math.random() * FLOURISHES.length)] ?? 'hop'
       a.flourishAt = now
@@ -302,6 +304,15 @@ export default function PetRenderer({ node }: { node: PetNode }) {
         leanX = Math.sin(p * Math.PI) * 0.3
         leanZ = Math.sin(p * Math.PI * 6) * 0.1 * Math.sin(p * Math.PI)
       }
+    }
+
+    // Singing: a little metronome dance for the whole song — side sway on the
+    // beat, bounce on the off-beat, and a slow face-the-room turn.
+    if (rt && now < rt.singingUntil) {
+      const beatT = t * Math.PI * 2 * 2.1
+      leanZ += Math.sin(beatT) * 0.12
+      stretch += Math.max(0, Math.sin(beatT * 2)) * 0.05
+      spinY += Math.sin(t * 1.1) * 0.35
     }
 
     const hatchAge = node.hatchedAt == null ? Number.POSITIVE_INFINITY : now - node.hatchedAt

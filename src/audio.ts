@@ -371,3 +371,79 @@ export function eggWiggleTick(): void {
   })
   burst({ duration: 0.03, freq: 900 * v, gain: 0.06, q: 1.6 })
 }
+
+// ── Songs ────────────────────────────────────────────────────────────────────
+
+/** Semitone steps over the root: major pentatonic vs minor pentatonic. */
+const SONG_SCALES = {
+  happy: [0, 2, 4, 7, 9, 12, 14],
+  sad: [0, 3, 5, 7, 10, 12],
+} as const
+
+// Park–Miller LCG — deterministic per seed, no bitwise ops.
+function songRng(seed: number): () => number {
+  let state = (Math.abs(Math.floor(seed)) % 2_147_483_646) + 1
+  return () => {
+    state = (state * 16_807) % 2_147_483_647
+    return (state - 1) / 2_147_483_646
+  }
+}
+
+/**
+ * A pet's signature song: an A-A-B phrase generated deterministically from its
+ * genome seed, so every creature hums the same little tune its whole life —
+ * major pentatonic when it feels good, the minor version when it doesn't.
+ * Returns the song duration in seconds (0 when rate-limited) so the caller
+ * can hold the music emote and the dance for exactly that long.
+ */
+export function petSong(voice: Voice, seed: number, flavor: 'happy' | 'sad' = 'happy'): number {
+  if (rateLimited('song', 4000)) return 0
+  const rng = songRng(seed)
+  const scale = SONG_SCALES[flavor]
+  const beat = 60 / (126 + rng() * 54) / 2 // an eighth note at 126–180 bpm
+  const root = voice.basePitchHz
+  const stepHz = (semitones: number) => root * 2 ** (semitones / 12)
+
+  // The motif: 3–4 scale notes with a rhythm of eighths and quarters.
+  const motif: { semi: number; beats: number }[] = []
+  const motifLen = 3 + Math.floor(rng() * 2)
+  for (let i = 0; i < motifLen; i++) {
+    motif.push({
+      semi: scale[Math.floor(rng() * scale.length)] as number,
+      beats: rng() < 0.3 ? 2 : 1,
+    })
+  }
+
+  let at = 0
+  const note = (semi: number, beats: number, gain = 0.15) => {
+    const detune = 1 + (rng() - 0.5) * 0.02
+    tone({
+      attack: 0.008,
+      delay: at,
+      duration: beat * beats * 0.82,
+      freq: stepHz(semi) * detune,
+      gain,
+      type: voice.timbre,
+    })
+    at += beat * beats
+  }
+
+  // A A: the motif twice, the repeat a touch quieter like a real hummed echo.
+  for (const pass of [0.16, 0.12] as const) {
+    for (const m of motif) note(m.semi, m.beats, pass)
+    at += beat * 0.5
+  }
+  // B: answer phrase — walk down the scale, sometimes popping the octave…
+  const walk = [...scale].reverse().slice(0, 3)
+  if (rng() < 0.35) note(12 + (scale[1] as number), 1)
+  for (const semi of walk) note(semi, 1)
+  // …then land: a quick trill into the root, or a plain held root.
+  if (rng() < 0.45) {
+    note(2, 0.5)
+    note(0, 0.5)
+    note(2, 0.5)
+  }
+  note(0, 3, 0.17)
+
+  return at + 0.15
+}

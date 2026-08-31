@@ -5,7 +5,7 @@ import { useViewer } from '@pascal-app/viewer'
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
 import { Box3, Vector3 } from 'three'
-import { eggWiggleTick, hatchFanfare, munch, petChirp } from './audio'
+import { eggWiggleTick, hatchFanfare, munch, petChirp, petSong } from './audio'
 import { voiceOf } from './genome'
 import { isReadOnlyHost } from './host'
 import { type BowlNode, EGG_HATCH_MS, lifeStageOf, type PetNode, PoopNode } from './schema'
@@ -317,7 +317,11 @@ export default function PetsSystem() {
           : null
       const stage = lifeStageOf(pet, now)
       const speedScale = rt.activity === 'follow' ? 1.8 : stage === 'baby' ? 0.6 : 1
-      const moving = rt.activity !== 'idle' && rt.activity !== 'nap' && rt.activity !== 'eating'
+      const moving =
+        rt.activity !== 'idle' &&
+        rt.activity !== 'nap' &&
+        rt.activity !== 'eating' &&
+        now >= rt.singingUntil
       if (moving) {
         stepSteering(rt, target, home, LEASH_RADIUS, probe, dt, speedScale)
       } else {
@@ -415,10 +419,30 @@ function runBehavior(
     scene.createNode(poop as unknown as AnyNode, pet.parentId as AnyNodeId)
   }
 
-  // Voice cadence: mood chirps every 8–20 s per pet.
-  if (now - rt.lastVocalAt > 8000 + Math.random() * 12_000) {
+  // Voice cadence: chirps every 7–16 s, and every 60–150 s an idle pet
+  // performs its signature song (with the dance to match).
+  const mood = moodOf(pet, hygieneOf(world.poopCount))
+  const singing = now < rt.singingUntil
+  if (
+    !singing &&
+    mood !== 'sleepy' &&
+    (rt.activity === 'idle' || rt.activity === 'wander') &&
+    now - rt.lastSongAt > 60_000 + Math.random() * 90_000
+  ) {
+    const flavor = mood === 'hungry' || mood === 'lonely' || mood === 'grumpy' ? 'sad' : 'happy'
+    const duration = petSong(voiceOf(pet.genome), pet.genome.seed, flavor)
+    if (duration > 0) {
+      rt.lastSongAt = now
+      rt.lastVocalAt = now
+      rt.singingUntil = now + duration * 1000
+      rt.emote = 'music'
+      rt.emoteUntil = rt.singingUntil
+      return
+    }
+  }
+  if (!singing && now - rt.lastVocalAt > 7000 + Math.random() * 9000) {
     rt.lastVocalAt = now
-    petChirp(voiceOf(pet.genome), moodOf(pet, hygieneOf(world.poopCount)))
+    petChirp(voiceOf(pet.genome), mood)
   }
 }
 

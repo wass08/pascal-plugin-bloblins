@@ -34,6 +34,10 @@ export type PetRuntime = {
   emoteUntil: number
   /** last time this pet chirped, to space out voice lines */
   lastVocalAt: number
+  /** last time this pet performed its song; songs are rare set-pieces */
+  lastSongAt: number
+  /** epoch ms until which the pet is mid-song — drives the dance sway */
+  singingUntil: number
   /** transient pat feedback: epoch ms of the last pat, drives squash + hearts */
   lastPatAt: number
 }
@@ -53,6 +57,8 @@ export function ensureRuntime(id: string, home: [number, number]): PetRuntime {
       emote: null,
       emoteUntil: 0,
       lastVocalAt: 0,
+      lastSongAt: 0,
+      singingUntil: 0,
       lastPatAt: 0,
     }
     petRuntimes.set(id, runtime)
