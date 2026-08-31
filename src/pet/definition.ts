@@ -56,6 +56,7 @@ export const petDefinition: NodeDefinition<typeof PetNode> & Record<string, unkn
   tool: () => import('./tool'),
   preview: () => import('./preview'),
   presentation: {
+    findInCatalog: false,
     label: 'Pet',
     description: 'A procedural companion hatched from a one-of-a-kind egg.',
     icon: { kind: 'iconify', name: 'lucide:cat' },

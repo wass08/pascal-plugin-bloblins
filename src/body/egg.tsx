@@ -30,8 +30,8 @@ function speckleLayout(seed: number): Speckle[] {
     const phi = rng() * Math.PI * 2
     const ring = Math.sqrt(Math.max(0.05, 1 - y * y))
     out.push({
-      position: [ring * Math.cos(phi) * 0.94, y * 0.94, ring * Math.sin(phi) * 0.94],
-      scale: 0.11 + rng() * 0.1,
+      position: [ring * Math.cos(phi) * 0.96, y * 0.96, ring * Math.sin(phi) * 0.96],
+      scale: 0.08 + rng() * 0.07,
     })
   }
   return out
@@ -64,7 +64,8 @@ export default function EggBody({
       scale={[EGG_RADIUS, EGG_RADIUS * EGG_STRETCH, EGG_RADIUS]}
     >
       <mesh castShadow={!ghost} geometry={UNIT_SPHERE} receiveShadow={!ghost} {...overrides}>
-        <meshStandardMaterial color={colors.body} roughness={0.42} {...shading} />
+        {/* Matte all the way through: these are clay toys, not glazed china. */}
+        <meshStandardMaterial color={colors.body} metalness={0} roughness={0.9} {...shading} />
       </mesh>
       {speckles.map((speckle) => (
         <mesh
@@ -74,7 +75,7 @@ export default function EggBody({
           scale={speckle.scale}
           {...overrides}
         >
-          <meshStandardMaterial color={colors.accent} roughness={0.55} {...shading} />
+          <meshStandardMaterial color={colors.accent} metalness={0} roughness={0.9} {...shading} />
         </mesh>
       ))}
     </group>

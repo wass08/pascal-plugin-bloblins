@@ -235,6 +235,27 @@ export function petChirp(voice: Voice, mood: Mood): void {
   }
 }
 
+/**
+ * The little cry of a neglected pet: three soft blips falling a whole tone at
+ * a time, each one bending down as it fades. Rate-limited hard — a sad room
+ * full of pets should sound plaintive, not like a smoke alarm.
+ */
+export function whimper(voice?: Voice): void {
+  if (rateLimited('whimper', 1400)) return
+  const base = (voice?.basePitchHz ?? 440) * 0.8 * (1 + (Math.random() - 0.5) * 0.05)
+  const type = voice?.timbre === 'square' ? 'triangle' : (voice?.timbre ?? 'sine')
+  let at = 0
+  for (const [ratio, duration, gain] of [
+    [1, 0.2, 0.13],
+    [0.89, 0.22, 0.115],
+    [0.79, 0.34, 0.095],
+  ] as const) {
+    const freq = base * ratio
+    tone({ attack: 0.03, delay: at, duration, freq, freqEnd: freq * 0.87, gain, type })
+    at += duration * 0.85
+  }
+}
+
 /** ~1s low wobbly triangle — the LFO on the envelope gain is the purr. */
 export function petPurr(voice: Voice): void {
   if (rateLimited('purr', 320)) return

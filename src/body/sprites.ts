@@ -70,9 +70,11 @@ function drawBubble(glyph: string): Draw {
     const width = size - pad * 2
     const height = size * 0.7
     ctx.clearRect(0, 0, size, size)
-    ctx.fillStyle = 'rgba(253, 251, 247, 0.96)'
-    ctx.strokeStyle = 'rgba(52, 44, 38, 0.22)'
-    ctx.lineWidth = size * 0.035
+    ctx.fillStyle = 'rgba(253, 251, 247, 0.97)'
+    // The bubble composites on the overlay layer, over whatever the pet is
+    // standing in front of, so it carries its own contrast.
+    ctx.strokeStyle = 'rgba(52, 44, 38, 0.32)'
+    ctx.lineWidth = size * 0.045
     roundRectPath(ctx, pad, pad, width, height, size * 0.24)
     ctx.fill()
     ctx.stroke()
@@ -126,6 +128,29 @@ const drawSparkle: Draw = (ctx, size) => {
   ctx.fill()
 }
 
+const drawTear: Draw = (ctx, size) => {
+  const c = size / 2
+  const r = size * 0.3
+  ctx.clearRect(0, 0, size, size)
+  const fill = ctx.createRadialGradient(c - r * 0.3, c + r * 0.1, 0, c, c + r * 0.2, r * 1.5)
+  fill.addColorStop(0, 'rgba(226, 244, 255, 0.98)')
+  fill.addColorStop(0.55, 'rgba(148, 200, 240, 0.95)')
+  fill.addColorStop(1, 'rgba(110, 172, 224, 0.9)')
+  ctx.fillStyle = fill
+  // Round bottom, drawn-out point on top — a drop mid-fall.
+  ctx.beginPath()
+  ctx.moveTo(c, c - r * 1.55)
+  ctx.bezierCurveTo(c + r * 0.5, c - r * 0.5, c + r, c - r * 0.1, c + r, c + r * 0.25)
+  ctx.arc(c, c + r * 0.25, r, 0, Math.PI)
+  ctx.bezierCurveTo(c - r, c - r * 0.1, c - r * 0.5, c - r * 0.5, c, c - r * 1.55)
+  ctx.closePath()
+  ctx.fill()
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.75)'
+  ctx.beginPath()
+  ctx.ellipse(c - r * 0.34, c + r * 0.16, r * 0.16, r * 0.26, -0.35, 0, Math.PI * 2)
+  ctx.fill()
+}
+
 /** Speech bubble for an emote, shared by every pet showing that emote. */
 export function emoteMaterial(emote: Emote): SpriteMaterial {
   return material(`emote:${emote}`, drawBubble(EMOTE_GLYPH[emote]), 128)
@@ -134,6 +159,11 @@ export function emoteMaterial(emote: Emote): SpriteMaterial {
 /** The little hearts that puff up out of a patted pet. */
 export function heartMaterial(): SpriteMaterial {
   return material('heart', drawHeart, 64)
+}
+
+/** The tears a lonely pet sheds — three of these slide off its face. */
+export function tearMaterial(): SpriteMaterial {
+  return material('tear', drawTear, 64)
 }
 
 /** Refill twinkle over a freshly filled bowl. */

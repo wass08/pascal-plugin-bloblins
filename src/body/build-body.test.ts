@@ -4,14 +4,69 @@ import { buildBodySpec } from './build-body'
 
 const base = PetGenome.parse({ bodySize: 0.5, earSize: 0.5, pattern: 'solid' })
 
+const idsOf = (genome: PetGenome, growth = 1): string[] =>
+  buildBodySpec(genome, growth).parts.map((part) => part.id)
+
+const countPrefixed = (genome: PetGenome, prefix: string): number =>
+  idsOf(genome).filter((id) => id.startsWith(prefix)).length
+
 describe('procedural body specs', () => {
-  test('is deterministic and includes stable core parts', () => {
+  test('is one blob with a face on it — no separate head', () => {
     const first = buildBodySpec(base, 1)
     expect(first).toEqual(buildBodySpec(base, 1))
-    expect(first.parts.filter((part) => part.id.startsWith('foot-'))).toHaveLength(4)
-    expect(first.parts.filter((part) => part.id.startsWith('eye-'))).toHaveLength(4)
+    expect(idsOf(base)).toContain('body')
+    expect(idsOf(base)).not.toContain('head')
+    expect(first.parts.filter((part) => part.id.startsWith('foot-'))).toHaveLength(2)
     expect(first.totalHeight).toBeGreaterThan(first.eyeHeight)
     expect(first.emoteAnchor[1]).toBeGreaterThan(first.totalHeight)
+  })
+
+  test('only eye parts say "eye" and only ear parts say "ear"', () => {
+    // The renderer rigs blinking and ear droop by substring, so a decoration
+    // that smuggled either word in would start blinking.
+    for (const eyeStyle of ['dot', 'sparkle', 'sleepy'] as const) {
+      for (const topper of [
+        'none',
+        'leaf',
+        'sprout',
+        'horns',
+        'spikes',
+        'tuft',
+        'wings',
+      ] as const) {
+        for (const id of idsOf({ ...base, eyeStyle, topper, earType: 'antenna' })) {
+          expect(id.includes('eye')).toBe(id.startsWith('eye-'))
+          expect(id.includes('ear')).toBe(id.startsWith('ear-'))
+        }
+      }
+    }
+  })
+
+  test.each([
+    ['round', 0],
+    ['egg', 1],
+    ['pear', 1],
+    ['droplet', 2],
+  ] as const)('%s adds %i extra mass part(s)', (bodyShape, extra) => {
+    const ids = idsOf({ ...base, bodyShape })
+    expect(ids.filter((id) => id.startsWith('body-'))).toHaveLength(extra)
+    if (bodyShape === 'droplet') expect(ids).toContain('body-tip')
+    if (bodyShape === 'egg' || bodyShape === 'pear') expect(ids).toContain('body-top')
+  })
+
+  test.each([
+    ['dot', 2],
+    ['sparkle', 6],
+    ['sleepy', 4],
+  ] as const)('%s eyes create %i parts', (eyeStyle, count) => {
+    expect(countPrefixed({ ...base, eyeStyle }, 'eye-')).toBe(count)
+  })
+
+  test('dot eyes have no whites and sparkles do', () => {
+    const dot = buildBodySpec({ ...base, eyeStyle: 'dot' }, 1)
+    const sparkle = buildBodySpec({ ...base, eyeStyle: 'sparkle' }, 1)
+    expect(dot.parts.filter((part) => part.color === 'eyeWhite')).toHaveLength(0)
+    expect(sparkle.parts.filter((part) => part.color === 'eyeWhite')).toHaveLength(4)
   })
 
   test.each([
@@ -22,8 +77,32 @@ describe('procedural body specs', () => {
     ['floppy', 2],
     ['antenna', 4],
   ] as const)('%s ears create %i parts', (earType, count) => {
-    const spec = buildBodySpec({ ...base, earType }, 1)
-    expect(spec.parts.filter((part) => part.id.startsWith('ear-'))).toHaveLength(count)
+    expect(countPrefixed({ ...base, earType }, 'ear-')).toBe(count)
+  })
+
+  test.each([
+    ['none', 0],
+    ['leaf', 2],
+    ['sprout', 3],
+    ['horns', 2],
+    ['spikes', 3],
+    ['tuft', 3],
+    ['wings', 4],
+  ] as const)('%s topper creates %i parts', (topper, count) => {
+    expect(countPrefixed({ ...base, topper }, 'topper-')).toBe(count)
+  })
+
+  test('toppers wear their fixed clay colors', () => {
+    const leaves = buildBodySpec({ ...base, topper: 'sprout' }, 1).parts
+    expect(leaves.every((part) => !part.id.startsWith('topper-') || part.color === 'leaf')).toBe(
+      true,
+    )
+    for (const topper of ['horns', 'tuft'] as const) {
+      const parts = buildBodySpec({ ...base, topper }, 1).parts
+      expect(parts.every((part) => !part.id.startsWith('topper-') || part.color === 'cream')).toBe(
+        true,
+      )
+    }
   })
 
   test.each([
@@ -33,29 +112,29 @@ describe('procedural body specs', () => {
     ['puff', 1],
     ['long', 1],
   ] as const)('%s tail creates %i parts', (tailType, count) => {
-    const spec = buildBodySpec({ ...base, tailType }, 1)
-    expect(spec.parts.filter((part) => part.id === 'tail')).toHaveLength(count)
+    expect(idsOf({ ...base, tailType }).filter((id) => id === 'tail')).toHaveLength(count)
   })
 
   test('patterns create the contracted decoration counts', () => {
-    expect(buildBodySpec({ ...base, pattern: 'solid' }, 1).parts.filter((part) => part.id === 'belly')).toHaveLength(0)
-    expect(buildBodySpec({ ...base, pattern: 'belly' }, 1).parts.filter((part) => part.id === 'belly')).toHaveLength(1)
-    expect(buildBodySpec({ ...base, pattern: 'stripes' }, 1).parts.filter((part) => part.id.startsWith('stripe-'))).toHaveLength(3)
-    const spots = buildBodySpec({ ...base, pattern: 'spots', seed: 123 }, 1).parts.filter((part) => part.id.startsWith('spot-'))
-    expect(spots.length).toBeGreaterThanOrEqual(4)
-    expect(spots.length).toBeLessThanOrEqual(7)
+    expect(idsOf({ ...base, pattern: 'solid' }).filter((id) => id === 'belly')).toHaveLength(0)
+    expect(idsOf({ ...base, pattern: 'belly' }).filter((id) => id === 'belly')).toHaveLength(1)
+    expect(countPrefixed({ ...base, pattern: 'stripes' }, 'stripe-')).toBe(3)
+    const spots = countPrefixed({ ...base, pattern: 'spots', seed: 123 }, 'spot-')
+    expect(spots).toBeGreaterThanOrEqual(4)
+    expect(spots).toBeLessThanOrEqual(7)
   })
 
-  test('babies have a larger head-to-body ratio and shorter feet', () => {
-    const baby = buildBodySpec(base, 0.5)
+  test('babies are smaller all over but proportionally bigger-eyed', () => {
+    const baby = buildBodySpec(base, 0)
     const adult = buildBodySpec(base, 1)
-    const babyHead = baby.parts.find((part) => part.id === 'head')!
     const babyBody = baby.parts.find((part) => part.id === 'body')!
-    const adultHead = adult.parts.find((part) => part.id === 'head')!
     const adultBody = adult.parts.find((part) => part.id === 'body')!
-    const babyFoot = baby.parts.find((part) => part.id === 'foot-fl')!
-    const adultFoot = adult.parts.find((part) => part.id === 'foot-fl')!
-    expect(babyHead.scale[0] / babyBody.scale[0]).toBeGreaterThan(adultHead.scale[0] / adultBody.scale[0])
-    expect(babyFoot.scale[1] / babyBody.scale[1]).toBeLessThan(adultFoot.scale[1] / adultBody.scale[1])
+    const babyEye = baby.parts.find((part) => part.id === 'eye-l')!
+    const adultEye = adult.parts.find((part) => part.id === 'eye-l')!
+    expect(babyBody.scale[0]).toBeLessThan(adultBody.scale[0])
+    expect(baby.totalHeight).toBeLessThan(adult.totalHeight)
+    expect(babyEye.scale[0] / babyBody.scale[0]).toBeGreaterThan(
+      adultEye.scale[0] / adultBody.scale[0],
+    )
   })
 })

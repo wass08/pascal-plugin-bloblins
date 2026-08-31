@@ -4,7 +4,7 @@ import { type AnyNode, type AnyNodeId, sceneRegistry, useScene } from '@pascal-a
 import { useViewer } from '@pascal-app/viewer'
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
-import { Vector3 } from 'three'
+import { Box3, Vector3 } from 'three'
 import { eggWiggleTick, hatchFanfare, munch, petChirp } from './audio'
 import { voiceOf } from './genome'
 import { isReadOnlyHost } from './host'
@@ -24,11 +24,58 @@ const FOLLOW_RANGE = 6
 
 type WallSeg = { ax: number; az: number; bx: number; bz: number; halfWidth: number }
 
+type CircleObstacle = { id: string; cx: number; cz: number; r: number }
+
 type LevelWorld = {
   walls: WallSeg[]
+  obstacles: CircleObstacle[]
   bowls: { id: string; pos: [number, number]; food: number }[]
   furniture: { id: string; pos: [number, number]; kind: 'bed' | 'seat' | 'hearth' }[]
   poopCount: number
+}
+
+/** Node kinds pets must not walk through (beyond walls). */
+const OBSTACLE_TYPES = new Set(['item', 'cabinet', 'block', 'column'])
+
+// Footprint radii from the registered Object3D's bbox, cached per node — the
+// bbox traversal is too heavy for every world rebuild.
+const obstacleRadii = new Map<string, number>()
+const bboxHelper = new Box3()
+
+function obstacleRadius(id: string): number | null {
+  const cached = obstacleRadii.get(id)
+  if (cached != null) return cached
+  const object = sceneRegistry.nodes.get(id)
+  if (!object) return null
+  bboxHelper.setFromObject(object)
+  if (bboxHelper.isEmpty()) return null
+  const sizeX = bboxHelper.max.x - bboxHelper.min.x
+  const sizeZ = bboxHelper.max.z - bboxHelper.min.z
+  const r = Math.min(1.2, Math.max(0.12, Math.max(sizeX, sizeZ) * 0.4))
+  obstacleRadii.set(id, r)
+  return r
+}
+
+/** Distance along a 2D ray to a circle, or null when clear. */
+function rayCircleDistance(
+  fx: number,
+  fz: number,
+  dx: number,
+  dz: number,
+  maxDist: number,
+  circle: CircleObstacle,
+): number | null {
+  const ocx = fx - circle.cx
+  const ocz = fz - circle.cz
+  const r = circle.r + PET_RADIUS
+  const b = ocx * dx + ocz * dz
+  const c = ocx * ocx + ocz * ocz - r * r
+  if (c <= 0) return 0
+  const disc = b * b - c
+  if (disc < 0) return null
+  const t = -b - Math.sqrt(disc)
+  if (t < 0 || t > maxDist) return null
+  return t
 }
 
 /** Distance along a 2D ray to a thick segment, or null when clear. */
@@ -62,7 +109,7 @@ function buildWorlds(nodes: Record<string, AnyNode>): Map<string, LevelWorld> {
   const world = (levelId: string): LevelWorld => {
     let w = worlds.get(levelId)
     if (!w) {
-      w = { walls: [], bowls: [], furniture: [], poopCount: 0 }
+      w = { walls: [], obstacles: [], bowls: [], furniture: [], poopCount: 0 }
       worlds.set(levelId, w)
     }
     return w
@@ -109,6 +156,12 @@ function buildWorlds(nodes: Record<string, AnyNode>): Map<string, LevelWorld> {
     if (kind && n.position) {
       world(n.parentId).furniture.push({ id: n.id, pos: [n.position[0], n.position[2]], kind })
     }
+    if (OBSTACLE_TYPES.has(n.type) && n.position) {
+      const r = obstacleRadius(n.id)
+      if (r != null) {
+        world(n.parentId).obstacles.push({ id: n.id, cx: n.position[0], cz: n.position[2], r })
+      }
+    }
   }
   return worlds
 }
@@ -127,6 +180,7 @@ export default function PetsSystem() {
   const worldsBuiltAt = useRef(0)
   const lastCommitAt = useRef(Date.now())
   const behaviorAt = useRef(new Map<string, number>())
+  const prevHomes = useRef(new Map<string, [number, number]>())
 
   // One-time real-time catch-up for stats accrued while the project was
   // closed, committed in a single batch.
@@ -201,8 +255,24 @@ export default function PetsSystem() {
         continue
       }
 
+      // Dropping / dragging a pet moves its home anchor — snap the live
+      // wander position there so the pet lands where the user put it.
+      const prevHome = prevHomes.current.get(pet.id)
+      if (!prevHome || Math.hypot(prevHome[0] - home[0], prevHome[1] - home[1]) > 1e-4) {
+        prevHomes.current.set(pet.id, home)
+        if (prevHome) {
+          rt.pos[0] = home[0]
+          rt.pos[1] = home[1]
+          rt.targetId = null
+          rt.activity = 'idle'
+          rt.activityUntil = now + 800
+          rt.speed = 0
+        }
+      }
+
       const world = worlds.current.get(levelId) ?? {
         walls: [],
+        obstacles: [],
         bowls: [],
         furniture: [],
         poopCount: 0,
@@ -223,11 +293,17 @@ export default function PetsSystem() {
         )
       }
 
-      // Per-frame steering against this level's walls.
+      // Per-frame steering against this level's walls and furniture, minus
+      // whatever the pet is deliberately walking to.
       const probe: ObstacleProbe = (from, dir, maxDist) => {
         let best: number | null = null
         for (const seg of world.walls) {
           const d = raySegmentDistance(from[0], from[1], dir[0], dir[1], maxDist, seg)
+          if (d != null && (best == null || d < best)) best = d
+        }
+        for (const circle of world.obstacles) {
+          if (circle.id === rt.targetId) continue
+          const d = rayCircleDistance(from[0], from[1], dir[0], dir[1], maxDist, circle)
           if (d != null && (best == null || d < best)) best = d
         }
         return best
@@ -330,13 +406,8 @@ function runBehavior(
   }
 
   if (out.wantsPoop && !readOnly) {
-    const behind = -0.35
     const poop = PoopNode.parse({
-      position: [
-        rt.pos[0] + Math.cos(rt.heading + Math.PI) * -behind * -1,
-        0,
-        rt.pos[1] + Math.sin(rt.heading + Math.PI) * -behind * -1,
-      ],
+      position: [rt.pos[0] - Math.cos(rt.heading) * 0.3, 0, rt.pos[1] - Math.sin(rt.heading) * 0.3],
       rotation: [0, Math.random() * Math.PI * 2, 0],
       size: 0.3 + Math.random() * 0.5,
       createdAt: now,

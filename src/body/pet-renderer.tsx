@@ -1,6 +1,7 @@
 'use client'
 
 import { useRegistry, useScene } from '@pascal-app/core'
+import { EDITOR_LAYER } from '@pascal-app/editor'
 import { useNodeEvents } from '@pascal-app/viewer'
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
@@ -12,7 +13,8 @@ import {
   type Object3D,
   type Sprite,
 } from 'three'
-import { genomeColors } from '../genome'
+import { whimper } from '../audio'
+import { genomeColors, PET_CREAM, PET_LEAF, voiceOf } from '../genome'
 import { patPet } from '../interaction'
 import { memberElevation } from '../pet/elevation'
 import { EGG_HATCH_MS, growthOf, type PetNode, type PoopNode } from '../schema'
@@ -22,7 +24,7 @@ import type { BodyPart } from './body-spec'
 import { buildBodySpec } from './build-body'
 import EggBody, { EGG_HEIGHT } from './egg'
 import { geometryFor, NO_RAYCAST, UNIT_SPHERE } from './primitives'
-import { emoteMaterial, heartMaterial } from './sprites'
+import { emoteMaterial, heartMaterial, tearMaterial } from './sprites'
 
 const BLINK_MS = 130
 const PAT_SQUASH_MS = 600
@@ -32,7 +34,30 @@ const MOOD_INTERVAL_MS = 700
 const POOP_SCAN_MS = 1000
 const POOP_NEAR_RADIUS = 4
 const HEART_SLOTS = [0, 1, 2]
+const TEAR_SLOTS = [0, 1, 2]
+const TEAR_MS = 2200
+const CRY_GAP_MIN_MS = 11_000
+const CRY_GAP_SPREAD_MS = 14_000
+const FLOURISH_GAP_MIN_MS = 6000
+const FLOURISH_GAP_SPREAD_MS = 9000
 const ZERO3: [number, number, number] = [0, 0, 0]
+
+/** The little unprompted performances an idle pet gives, so it never reads as a prop. */
+type Flourish = 'hop' | 'spin' | 'stretch' | 'look' | 'wiggle'
+const FLOURISHES = [
+  'hop',
+  'spin',
+  'stretch',
+  'look',
+  'wiggle',
+] as const satisfies readonly Flourish[]
+const FLOURISH_MS: Record<Flourish, number> = {
+  hop: 950,
+  look: 1500,
+  spin: 800,
+  stretch: 1000,
+  wiggle: 1200,
+}
 
 /**
  * Poop positions, scanned at most once a second for the WHOLE scene and
@@ -81,9 +106,13 @@ function droopFor(mood: Mood): number {
  * the scene; body language is refs and material tweaks only.
  *
  * Geometry is one shared unit primitive per part kind scaled per part, and
- * materials are four per pet (body / accent / eye / eye white), so the cost
- * of a pet is a handful of draw calls with plain standard materials — the
- * host renders through WebGPU, so no custom shaders anywhere.
+ * materials are six per pet (body / accent / eye / eye white / leaf / cream),
+ * so the cost of a pet is a handful of draw calls with plain standard
+ * materials — the host renders through WebGPU, so no custom shaders anywhere.
+ *
+ * The emote bubble, hearts and tears live on `EDITOR_LAYER`, which the host
+ * composites AFTER post-processing: on the scene layer the SSGI/AO/ink passes
+ * treat a sprite as geometry and shade the bubble like a dark grey card.
  */
 export default function PetRenderer({ node }: { node: PetNode }) {
   const ref = useRef<Group>(null!)
@@ -92,6 +121,7 @@ export default function PetRenderer({ node }: { node: PetNode }) {
   const shell = useRef<Mesh>(null!)
   const bubble = useRef<Sprite>(null!)
   const hearts = useRef<(Sprite | null)[]>([])
+  const tears = useRef<(Sprite | null)[]>([])
   const parts = useRef(new Map<string, Object3D>())
   const handlers = useNodeEvents(node as never, node.type as never)
   useRegistry(node.id, node.type, ref)
@@ -100,11 +130,15 @@ export default function PetRenderer({ node }: { node: PetNode }) {
 
   const materials = useMemo(() => {
     const colors = genomeColors(node.genome)
+    // Clay: fully rough, zero metalness, so the pastel reads as pigment in the
+    // material rather than a shiny toy.
     return {
-      body: new MeshStandardMaterial({ color: colors.body, roughness: 0.62 }),
-      accent: new MeshStandardMaterial({ color: colors.accent, roughness: 0.7 }),
-      eye: new MeshStandardMaterial({ color: colors.eye, roughness: 0.18 }),
-      eyeWhite: new MeshStandardMaterial({ color: '#fdfbf7', roughness: 0.25 }),
+      body: new MeshStandardMaterial({ color: colors.body, metalness: 0, roughness: 0.9 }),
+      accent: new MeshStandardMaterial({ color: colors.accent, metalness: 0, roughness: 0.9 }),
+      eye: new MeshStandardMaterial({ color: colors.eye, metalness: 0, roughness: 0.5 }),
+      eyeWhite: new MeshStandardMaterial({ color: '#fdfbf7', metalness: 0, roughness: 0.6 }),
+      leaf: new MeshStandardMaterial({ color: PET_LEAF, metalness: 0, roughness: 0.9 }),
+      cream: new MeshStandardMaterial({ color: PET_CREAM, metalness: 0, roughness: 0.9 }),
       shell: new MeshBasicMaterial({
         color: colors.accent,
         depthWrite: false,
@@ -126,6 +160,8 @@ export default function PetRenderer({ node }: { node: PetNode }) {
     [node.genome, node.hatchedAt],
   )
 
+  const voice = useMemo(() => voiceOf(node.genome), [node.genome])
+
   const rig = useMemo(() => {
     const eyes: string[] = []
     const ears: string[] = []
@@ -135,20 +171,34 @@ export default function PetRenderer({ node }: { node: PetNode }) {
       if (part.id.includes('eye')) eyes.push(part.id)
       else if (part.id.includes('ear')) ears.push(part.id)
     }
-    return { base, ears, eyes }
+    // Tears leave from whichever part sits at each eye — a sleepy pet has
+    // lids there instead of a pupil, and it should still be able to cry.
+    const left = spec.parts.find((part) => part.id.startsWith('eye-l'))
+    const right = spec.parts.find((part) => part.id.startsWith('eye-r'))
+    const from: [number, number, number][] = [
+      left?.position ?? [-0.04, spec.eyeHeight, 0.1],
+      right?.position ?? [0.04, spec.eyeHeight, 0.1],
+    ]
+    return { base, ears, eyes, tearFrom: from, tearSize: (left?.scale[0] ?? 0.02) * 2.6 }
   }, [spec])
 
   const anim = useRef({
     blinkUntil: 0,
+    cryAt: 0,
     droop: 0,
+    flourish: null as Flourish | null,
+    flourishAt: 0,
     hop: 0,
     mood: 'content' as Mood,
     moodAt: 0,
     nextBlinkAt: Date.now() + 1500 + Math.random() * 2000,
+    nextCryAt: Date.now() + 6000 + Math.random() * CRY_GAP_SPREAD_MS,
+    nextFlourishAt: Date.now() + 2000 + Math.random() * FLOURISH_GAP_SPREAD_MS,
     tilt: 0,
   })
 
   const emoteY = isEgg ? EGG_HEIGHT + 0.12 : spec.emoteAnchor[1]
+  const canBlink = node.genome.eyeStyle !== 'sleepy'
 
   useFrame((state, dt) => {
     const roamGroup = roam.current
@@ -187,15 +237,22 @@ export default function PetRenderer({ node }: { node: PetNode }) {
     }
 
     roamGroup.rotation.y = -(rt?.heading ?? 0) + Math.PI / 2
+    const napping = rt?.activity === 'nap'
 
     if (now - a.moodAt > MOOD_INTERVAL_MS) {
       a.moodAt = now + Math.random() * 250
       const x = rt?.pos[0] ?? node.position[0]
       const z = rt?.pos[1] ?? node.position[2]
       a.mood = moodOf(node, hygieneOf(poopsNear(now, x, z)))
+      // A pet nobody has played with cries about it, now and then.
+      const sad = a.mood === 'lonely' || node.happiness < 0.3
+      if (sad && !napping && now > a.nextCryAt) {
+        a.cryAt = now
+        a.nextCryAt = now + CRY_GAP_MIN_MS + Math.random() * CRY_GAP_SPREAD_MS
+        whimper(voice)
+      }
     }
 
-    const napping = rt?.activity === 'nap'
     const droopTarget = napping ? 1 : droopFor(a.mood)
     a.droop += (droopTarget - a.droop) * Math.min(1, dt * 3)
     a.tilt += ((napping ? 0.42 : 0) - a.tilt) * Math.min(1, dt * 2.5)
@@ -215,6 +272,38 @@ export default function PetRenderer({ node }: { node: PetNode }) {
       stretch -= Math.exp(-p * 3.2) * Math.sin(p * Math.PI * 2.2) * 0.26
     }
 
+    // Idle flourishes: every several seconds a loitering pet does something
+    // small and finite. Transient by construction — one enum in a ref.
+    const loitering = rt == null || rt.activity === 'idle' || rt.activity === 'wander'
+    if (a.flourish == null && loitering && !napping && now > a.nextFlourishAt) {
+      a.flourish = FLOURISHES[Math.floor(Math.random() * FLOURISHES.length)] ?? 'hop'
+      a.flourishAt = now
+    }
+    let lift = 0
+    let spinY = 0
+    let leanX = 0
+    let leanZ = 0
+    if (a.flourish) {
+      const p = (now - a.flourishAt) / FLOURISH_MS[a.flourish]
+      if (p >= 1 || napping) {
+        a.flourish = null
+        a.nextFlourishAt = now + FLOURISH_GAP_MIN_MS + Math.random() * FLOURISH_GAP_SPREAD_MS
+      } else if (a.flourish === 'hop') {
+        lift = Math.abs(Math.sin(p * Math.PI * 2)) * spec.totalHeight * 0.3
+        stretch += Math.sin(p * Math.PI * 4) * 0.1
+      } else if (a.flourish === 'spin') {
+        spinY = (p < 0.5 ? 2 * p * p : 1 - (-2 * p + 2) ** 2 / 2) * Math.PI * 2
+      } else if (a.flourish === 'stretch') {
+        stretch += Math.sin(p * Math.PI) * 0.2
+      } else if (a.flourish === 'look') {
+        spinY = Math.sin(p * Math.PI * 2) * 0.55
+        leanZ = Math.sin(p * Math.PI * 2) * -0.12
+      } else {
+        leanX = Math.sin(p * Math.PI) * 0.3
+        leanZ = Math.sin(p * Math.PI * 6) * 0.1 * Math.sin(p * Math.PI)
+      }
+    }
+
     const hatchAge = node.hatchedAt == null ? Number.POSITIVE_INFINITY : now - node.hatchedAt
     const hatching = hatchAge >= 0 && hatchAge < HATCH_POP_MS
     let pop = 1
@@ -223,9 +312,10 @@ export default function PetRenderer({ node }: { node: PetNode }) {
       pop = 0.32 + 0.68 * (1 - (1 - p) ** 2) + Math.sin(p * Math.PI) * 0.16
     }
 
-    poseGroup.position.y = Math.max(0, swing) * 0.05 * gait - a.tilt * 0.02
-    poseGroup.rotation.x = 0
-    poseGroup.rotation.z = a.tilt
+    poseGroup.position.y = Math.max(0, swing) * 0.05 * gait + lift - a.tilt * 0.02
+    poseGroup.rotation.x = leanX
+    poseGroup.rotation.y = spinY
+    poseGroup.rotation.z = a.tilt + leanZ
     poseGroup.scale.set(pop * (1 - stretch * 0.5), pop * (1 + stretch), pop * (1 - stretch * 0.5))
 
     const shellMesh = shell.current
@@ -242,7 +332,9 @@ export default function PetRenderer({ node }: { node: PetNode }) {
       a.blinkUntil = now + BLINK_MS
       a.nextBlinkAt = now + 2000 + Math.random() * 3000
     }
-    const lidded = napping || now < a.blinkUntil
+    // Already-shut eyes have nothing to blink: squashing a sleepy pet's lids
+    // would just make its face vanish for a frame.
+    const lidded = canBlink && (napping || now < a.blinkUntil)
     for (const id of rig.eyes) {
       const part = rig.base.get(id)
       const object = parts.current.get(id)
@@ -250,7 +342,7 @@ export default function PetRenderer({ node }: { node: PetNode }) {
       object.scale.set(part.scale[0], part.scale[1] * (lidded ? 0.12 : 1), part.scale[2])
     }
 
-    // Ears swing about the skull, not their own centres, so a multi-part ear
+    // Ears swing about the blob, not their own centres, so a multi-part ear
     // (antenna stalk + tip) stays welded together as it droops or perks.
     const swingAngle = a.droop * 0.6
     const swingCos = Math.cos(swingAngle)
@@ -281,6 +373,18 @@ export default function PetRenderer({ node }: { node: PetNode }) {
       const drift = Math.sin(p * Math.PI * 2 + slot * 2) * 0.05
       heart.position.set(drift + (slot - 1) * 0.05, emoteY - 0.1 + p * 0.34, 0)
       heart.scale.setScalar(0.02 + 0.1 * Math.sin(Math.min(1, p * 1.7) * Math.PI))
+    }
+
+    for (const slot of TEAR_SLOTS) {
+      const tear = tears.current[slot]
+      if (!tear) continue
+      const p = (now - a.cryAt) / TEAR_MS - slot * 0.3
+      const falling = p > 0 && p < 1
+      tear.visible = falling
+      const from = rig.tearFrom[slot % 2]
+      if (!(falling && from)) continue
+      tear.position.set(from[0] * 1.06, from[1] - p * from[1] * 0.85, from[2] + 0.01)
+      tear.scale.setScalar(rig.tearSize * (1 - p * 0.35))
     }
   })
 
@@ -329,6 +433,7 @@ export default function PetRenderer({ node }: { node: PetNode }) {
           />
         )}
         <sprite
+          layers={EDITOR_LAYER}
           material={emoteMaterial('hearts')}
           position={[0, emoteY, 0]}
           raycast={NO_RAYCAST}
@@ -339,12 +444,26 @@ export default function PetRenderer({ node }: { node: PetNode }) {
         {HEART_SLOTS.map((slot) => (
           <sprite
             key={slot}
+            layers={EDITOR_LAYER}
             material={heartMaterial()}
             raycast={NO_RAYCAST}
             ref={(sprite) => {
               hearts.current[slot] = sprite
             }}
             scale={[0.1, 0.1, 1]}
+            visible={false}
+          />
+        ))}
+        {TEAR_SLOTS.map((slot) => (
+          <sprite
+            key={slot}
+            layers={EDITOR_LAYER}
+            material={tearMaterial()}
+            raycast={NO_RAYCAST}
+            ref={(sprite) => {
+              tears.current[slot] = sprite
+            }}
+            scale={[0.05, 0.05, 1]}
             visible={false}
           />
         ))}

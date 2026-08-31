@@ -36,6 +36,35 @@ export function randomGenome(rng: () => number = Math.random): PetGenome {
     bodyRoundness: 0.48 + Math.sqrt(rng()) * 0.52,
     bodySize: 0.15 + centered(rng) * 0.7,
     headRatio: 0.42 + centered(rng) * 0.46,
+    bodyShape: weightedPick(
+      [
+        ['round', 36],
+        ['egg', 34],
+        ['droplet', 15],
+        ['pear', 15],
+      ] as const,
+      rng,
+    ),
+    topper: weightedPick(
+      [
+        ['none', 25],
+        ['leaf', 17],
+        ['sprout', 15],
+        ['horns', 10],
+        ['spikes', 10],
+        ['tuft', 12],
+        ['wings', 11],
+      ] as const,
+      rng,
+    ),
+    eyeStyle: weightedPick(
+      [
+        ['dot', 65],
+        ['sparkle', 20],
+        ['sleepy', 15],
+      ] as const,
+      rng,
+    ),
     earType: weightedPick(
       [
         ['none', 5],
@@ -80,6 +109,9 @@ export function randomGenome(rng: () => number = Math.random): PetGenome {
 export function mixGenomes(a: PetGenome, b: PetGenome, rng: () => number = Math.random): PetGenome {
   const mixed = {
     ...a,
+    bodyShape: rng() < 0.5 ? a.bodyShape : b.bodyShape,
+    topper: rng() < 0.5 ? a.topper : b.topper,
+    eyeStyle: rng() < 0.5 ? a.eyeStyle : b.eyeStyle,
     earType: rng() < 0.5 ? a.earType : b.earType,
     tailType: rng() < 0.5 ? a.tailType : b.tailType,
     pattern: rng() < 0.5 ? a.pattern : b.pattern,
@@ -99,14 +131,25 @@ export function mixGenomes(a: PetGenome, b: PetGenome, rng: () => number = Math.
   return PetGenome.parse(mixed)
 }
 
+/** Leaves and sprouts are always this green, whatever the pet is tinted. */
+export const PET_LEAF = '#a7cf8b'
+/** Horns, tufts and other "unpainted clay" accents. */
+export const PET_CREAM = '#f6eddb'
+
+/**
+ * Pastel clay palette: the toys these pets are modelled on read as tinted
+ * white, so the hue genes only choose *which* tint — lightness stays in a
+ * narrow 76–84% band and the saturation gene is compressed into 25–45%.
+ * A wider range would give us plastic toys instead of clay ones.
+ */
 export function genomeColors(g: PetGenome): { body: string; accent: string; eye: string } {
-  const saturation = Math.round(clamp01(g.saturation) * 100)
-  const bodyLightness = Math.round(62 + clamp01(g.bodyRoundness) * 6)
-  const accentLightness = Math.min(86, bodyLightness + 13)
+  const saturation = Math.round(38 + clamp01(g.saturation) * 22)
+  const bodyLightness = Math.round(72 + clamp01(g.bodyRoundness) * 8)
+  const accentLightness = Math.min(94, bodyLightness + 8)
   return {
     body: `hsl(${Math.round(clamp01(g.hue) * 360)}, ${saturation}%, ${bodyLightness}%)`,
-    accent: `hsl(${Math.round(clamp01(g.accentHue) * 360)}, ${saturation}%, ${accentLightness}%)`,
-    eye: 'hsl(25, 12%, 12%)',
+    accent: `hsl(${Math.round(clamp01(g.accentHue) * 360)}, ${Math.round(saturation * 0.62)}%, ${accentLightness}%)`,
+    eye: '#2a2624',
   }
 }
 

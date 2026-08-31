@@ -10,12 +10,15 @@ import type { Group } from 'three'
 import { useShallow } from 'zustand/shallow'
 import type { BodyPart, BodyPartColor } from './body/body-spec'
 import { buildBodySpec } from './body/build-body'
-import { genomeColors, randomGenome } from './genome'
+import { genomeColors, PET_CREAM, PET_LEAF, randomGenome } from './genome'
 import { fillBowl, patPet, scoopPoop } from './interaction'
+import { randomPetName } from './names'
 import {
+  BODY_SHAPES,
   BowlNode,
   EAR_TYPES,
   EGG_HATCH_MS,
+  EYE_STYLES,
   growthOf,
   lifeStageOf,
   PATTERNS,
@@ -23,6 +26,7 @@ import {
   type PetNode,
   type PoopNode,
   TAIL_TYPES,
+  TOPPERS,
 } from './schema'
 import { hygieneOf, moodOf } from './sim/stats'
 import { type Mood, usePets } from './store'
@@ -338,6 +342,8 @@ function partColor(role: BodyPartColor, colors: ReturnType<typeof genomeColors>)
   if (role === 'accent') return colors.accent
   if (role === 'eye') return colors.eye
   if (role === 'eyeWhite') return '#fbfaf7'
+  if (role === 'leaf') return PET_LEAF
+  if (role === 'cream') return PET_CREAM
   return colors.body
 }
 
@@ -379,7 +385,6 @@ type NumericGene =
   | 'earSize'
   | 'eyeSize'
   | 'eyeSpacing'
-  | 'headRatio'
   | 'hue'
   | 'limbLength'
   | 'saturation'
@@ -388,7 +393,6 @@ type NumericGene =
 const BODY_GENES: { key: NumericGene; label: string }[] = [
   { key: 'bodySize', label: 'Body size' },
   { key: 'bodyRoundness', label: 'Roundness' },
-  { key: 'headRatio', label: 'Head' },
   { key: 'limbLength', label: 'Limbs' },
 ]
 const FACE_GENES: { key: NumericGene; label: string }[] = [
@@ -475,9 +479,15 @@ function GroupHeading({ children }: { children: React.ReactNode }) {
 
 function HatchTab() {
   const genome = usePets((s) => s.draftGenome)
+  const draftName = usePets((s) => s.draftName)
   // R3F cannot render on the server; mount the preview after hydration.
   const [mounted, setMounted] = useState(false)
-  useEffect(() => setMounted(true), [])
+  useEffect(() => {
+    setMounted(true)
+    // 'Pip' is the store's placeholder, not a choice anyone made — roll a real
+    // name the first time the builder is opened.
+    if (usePets.getState().draftName === 'Pip') usePets.getState().setDraftName(randomPetName())
+  }, [])
 
   return (
     <div className="flex flex-col gap-3">
@@ -497,9 +507,30 @@ function HatchTab() {
         )}
       </div>
 
+      <div className="flex items-center gap-1.5">
+        <input
+          className="min-w-0 flex-1 rounded border border-sidebar-border/60 bg-sidebar-accent/40 px-2 py-1 text-xs outline-none"
+          onChange={(e) => usePets.getState().setDraftName(e.currentTarget.value)}
+          placeholder="Name"
+          value={draftName}
+        />
+        <button
+          className="shrink-0 rounded-full border border-sidebar-border/60 px-2.5 py-1 text-[11px] transition-colors hover:bg-sidebar-accent"
+          onClick={() => usePets.getState().setDraftName(randomPetName())}
+          title="Roll another name"
+          type="button"
+        >
+          🎲
+        </button>
+      </div>
+
       <button
         className="rounded-full border border-sidebar-border/60 px-3 py-1.5 text-xs transition-colors hover:bg-sidebar-accent"
-        onClick={() => usePets.getState().setDraftGenome(randomGenome())}
+        onClick={() => {
+          const pets = usePets.getState()
+          pets.setDraftGenome(randomGenome())
+          pets.setDraftName(randomPetName())
+        }}
         type="button"
       >
         🎲 Surprise me
@@ -508,11 +539,23 @@ function HatchTab() {
       <div className="flex flex-col gap-1">
         <GroupHeading>Body</GroupHeading>
         <GeneSliders genes={BODY_GENES} genome={genome} />
+        <ChipRow
+          label="Shape"
+          onChange={(bodyShape) => patchDraft({ bodyShape })}
+          options={BODY_SHAPES}
+          value={genome.bodyShape}
+        />
       </div>
 
       <div className="flex flex-col gap-1">
         <GroupHeading>Face</GroupHeading>
         <GeneSliders genes={FACE_GENES} genome={genome} />
+        <ChipRow
+          label="Style"
+          onChange={(eyeStyle) => patchDraft({ eyeStyle })}
+          options={EYE_STYLES}
+          value={genome.eyeStyle}
+        />
       </div>
 
       <div className="flex flex-col gap-1.5">
@@ -529,6 +572,12 @@ function HatchTab() {
           onChange={(tailType) => patchDraft({ tailType })}
           options={TAIL_TYPES}
           value={genome.tailType}
+        />
+        <ChipRow
+          label="Topper"
+          onChange={(topper) => patchDraft({ topper })}
+          options={TOPPERS}
+          value={genome.topper}
         />
       </div>
 

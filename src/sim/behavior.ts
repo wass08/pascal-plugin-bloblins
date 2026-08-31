@@ -58,12 +58,14 @@ function passiveEffects(
   if (emote == null) {
     if (mood === 'hungry') emote = 'food'
     else if (mood === 'sleepy') emote = 'zzz'
-    else if (mood === 'ecstatic' && ctx.rng() < 0.025) emote = 'hearts'
+    else if (mood === 'ecstatic' && ctx.rng() < 0.04) emote = 'hearts'
+    else if (mood === 'content' && ctx.rng() < 0.012) emote = 'music'
+    else if ((mood === 'lonely' || mood === 'grumpy') && ctx.rng() < 0.05) emote = 'grumble'
   }
 
   let wantsPoop = false
   if (activity !== 'nap' && activity !== 'eating' && ctx.stats.fullness > 0.3) {
-    const intervalSec = 20 * 60 + ctx.rng() * 20 * 60
+    const intervalSec = 4 * 60 + ctx.rng() * 4 * 60
     wantsPoop = ctx.rng() < 1 / intervalSec
   }
   return { emote, wantsPoop }
@@ -92,7 +94,7 @@ export function stepBehavior(rt: PetRuntime, ctx: BehaviorContext): BehaviorResu
   if (ctx.stage === 'egg') {
     return {
       activity: 'idle',
-      activityUntil: ctx.now + 5_000,
+      activityUntil: ctx.now + 5000,
       targetId: null,
       targetPos: null,
       emote: null,
@@ -108,7 +110,7 @@ export function stepBehavior(rt: PetRuntime, ctx: BehaviorContext): BehaviorResu
     }
     return {
       activity: 'wander',
-      activityUntil: ctx.now + 4_000 + ctx.rng() * 6_000,
+      activityUntil: ctx.now + 4000 + ctx.rng() * 6000,
       targetId: null,
       targetPos: null,
       emote: 'sparkle',
@@ -118,14 +120,19 @@ export function stepBehavior(rt: PetRuntime, ctx: BehaviorContext): BehaviorResu
   }
 
   if (ctx.followTarget != null) {
-    return result(ctx, 'follow', ctx.now + 1_000, null, ctx.followTarget, 'music')
+    return result(ctx, 'follow', ctx.now + 1000, null, ctx.followTarget, 'music')
   }
 
   if (ctx.stats.fullness < 0.35) {
     const currentBowl = ctx.bowls.find(
       (candidate) => candidate.id === rt.targetId && candidate.food > 0.05,
     )
-    const bowl = currentBowl ?? nearest(rt.pos, ctx.bowls.filter((candidate) => candidate.food > 0.05))
+    const bowl =
+      currentBowl ??
+      nearest(
+        rt.pos,
+        ctx.bowls.filter((candidate) => candidate.food > 0.05),
+      )
     if (bowl != null) {
       if (
         rt.activity === 'seek-bowl' &&
@@ -133,9 +140,9 @@ export function stepBehavior(rt: PetRuntime, ctx: BehaviorContext): BehaviorResu
         ctx.distToTarget != null &&
         ctx.distToTarget <= ARRIVE_DIST
       ) {
-        return result(ctx, 'eating', ctx.now + 4_000, bowl.id, bowl.pos, 'food')
+        return result(ctx, 'eating', ctx.now + 4000, bowl.id, bowl.pos, 'food')
       }
-      return result(ctx, 'seek-bowl', ctx.now + 1_000, bowl.id, bowl.pos, 'food')
+      return result(ctx, 'seek-bowl', ctx.now + 1000, bowl.id, bowl.pos, 'food')
     }
   }
 
@@ -158,7 +165,7 @@ export function stepBehavior(rt: PetRuntime, ctx: BehaviorContext): BehaviorResu
       ) {
         return result(ctx, 'nap', ctx.now + 60_000 + ctx.rng() * 60_000, furniture.id, null, 'zzz')
       }
-      return result(ctx, 'seek-furniture', ctx.now + 1_000, furniture.id, furniture.pos, 'zzz')
+      return result(ctx, 'seek-furniture', ctx.now + 1000, furniture.id, furniture.pos, 'zzz')
     }
     return result(ctx, 'nap', ctx.now + 60_000 + ctx.rng() * 60_000, null, null, 'zzz')
   }
@@ -168,7 +175,7 @@ export function stepBehavior(rt: PetRuntime, ctx: BehaviorContext): BehaviorResu
   }
 
   if (rt.activity === 'idle') {
-    return result(ctx, 'wander', ctx.now + 4_000 + ctx.rng() * 6_000, null, null, null)
+    return result(ctx, 'wander', ctx.now + 4000 + ctx.rng() * 6000, null, null, null)
   }
-  return result(ctx, 'idle', ctx.now + 3_000 + ctx.rng() * 3_000, null, null, null)
+  return result(ctx, 'idle', ctx.now + 3000 + ctx.rng() * 3000, null, null, null)
 }

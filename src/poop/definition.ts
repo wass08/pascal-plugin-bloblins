@@ -45,6 +45,7 @@ export const poopDefinition: NodeDefinition<typeof PoopNode> & Record<string, un
   },
   renderer: { kind: 'parametric', module: () => import('./renderer') },
   presentation: {
+    findInCatalog: false,
     label: 'Pet poop',
     description: 'Somebody has to scoop it. Press E.',
     icon: { kind: 'iconify', name: 'lucide:hand-metal' },

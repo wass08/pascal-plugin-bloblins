@@ -4,7 +4,12 @@
  * `kind` and instances parts by transform, so specs stay cheap to rebuild.
  * All positions are local to the pet origin (floor at y=0, facing +Z).
  */
-export type BodyPartColor = 'body' | 'accent' | 'eye' | 'eyeWhite'
+/**
+ * `body`/`accent`/`eye` come from the genome; `eyeWhite`, `leaf` and `cream`
+ * are fixed across every pet — sparkles are near-white, sprouts are green and
+ * horns/tufts are unpainted clay whatever the creature is tinted.
+ */
+export type BodyPartColor = 'body' | 'accent' | 'eye' | 'eyeWhite' | 'leaf' | 'cream'
 
 export type BodyPart = {
   id: string

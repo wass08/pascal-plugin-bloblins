@@ -6,6 +6,11 @@ const vec3 = z.tuple([z.number(), z.number(), z.number()])
 export const EAR_TYPES = ['none', 'nub', 'cat', 'bunny', 'floppy', 'antenna'] as const
 export const TAIL_TYPES = ['none', 'stub', 'curl', 'puff', 'long'] as const
 export const PATTERNS = ['solid', 'belly', 'spots', 'stripes'] as const
+/** Overall blob silhouette — one squishy mass, face on the body (no neck). */
+export const BODY_SHAPES = ['round', 'egg', 'droplet', 'pear'] as const
+/** Decoration growing from the top of the blob (clay-toy accents). */
+export const TOPPERS = ['none', 'leaf', 'sprout', 'horns', 'spikes', 'tuft', 'wings'] as const
+export const EYE_STYLES = ['dot', 'sparkle', 'sleepy'] as const
 
 /**
  * A pet's DNA. Every visual + audible trait derives from these genes, so a
@@ -17,6 +22,9 @@ export const PetGenome = z.object({
   bodyRoundness: z.number().min(0).max(1).default(0.7),
   bodySize: z.number().min(0).max(1).default(0.5),
   headRatio: z.number().min(0).max(1).default(0.6),
+  bodyShape: z.enum(BODY_SHAPES).default('round'),
+  topper: z.enum(TOPPERS).default('none'),
+  eyeStyle: z.enum(EYE_STYLES).default('dot'),
   earType: z.enum(EAR_TYPES).default('cat'),
   earSize: z.number().min(0).max(1).default(0.5),
   tailType: z.enum(TAIL_TYPES).default('curl'),
