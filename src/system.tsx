@@ -1,6 +1,7 @@
 'use client'
 
 import { type AnyNode, type AnyNodeId, sceneRegistry, useScene } from '@pascal-app/core'
+import { useEditor } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
@@ -125,19 +126,22 @@ function buildWorlds(nodes: Record<string, AnyNode>): Map<string, LevelWorld> {
       metadata?: unknown
       start?: [number, number]
       end?: [number, number]
+      path?: [number, number][]
       thickness?: number
       position?: [number, number, number]
       food?: number
     }
     if (!n.parentId) continue
-    if (n.type === 'wall' && n.start && n.end) {
-      world(n.parentId).walls.push({
-        ax: n.start[0],
-        az: n.start[1],
-        bx: n.end[0],
-        bz: n.end[1],
-        halfWidth: (n.thickness ?? 0.2) / 2,
-      })
+    if ((n.type === 'wall' || n.type === 'fence') && n.start && n.end) {
+      const halfWidth = (n.thickness ?? (n.type === 'fence' ? 0.08 : 0.2)) / 2
+      // Spline fences: collide against the control polygon — close enough to
+      // the Catmull-Rom centerline at pet scale.
+      const points = n.path && n.path.length >= 2 ? n.path : [n.start, n.end]
+      for (let i = 0; i < points.length - 1; i++) {
+        const a = points[i] as [number, number]
+        const b = points[i + 1] as [number, number]
+        world(n.parentId).walls.push({ ax: a[0], az: a[1], bx: b[0], bz: b[1], halfWidth })
+      }
       continue
     }
     if (n.type === 'pets:bowl' && n.position) {
@@ -240,6 +244,10 @@ export default function PetsSystem() {
     if (walkthrough) cameraWorld.copy(state.camera.position)
 
     const selectedIds = new Set(useViewer.getState().selection.selectedIds as readonly string[])
+    // A pet mid-drag freezes exactly like a selected one — no strolling away
+    // from under the move gizmo.
+    const movingId =
+      (useEditor.getState() as { movingNode?: { id?: string } | null }).movingNode?.id ?? null
 
     for (const node of Object.values(scene.nodes)) {
       if ((node as { type?: string }).type !== 'pets:pet') continue
@@ -289,7 +297,7 @@ export default function PetsSystem() {
       // A selected pet sits still with its node position snapped to where it
       // actually stands, so the move gizmo grabs the pet, not the stale home
       // anchor it wandered away from.
-      const selected = selectedIds.has(pet.id)
+      const selected = selectedIds.has(pet.id) || movingId === pet.id
       if (selected) {
         if (!prevSelected.current.has(pet.id)) {
           prevSelected.current.add(pet.id)

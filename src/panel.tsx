@@ -594,23 +594,6 @@ function HatchTab() {
         <GroupHeading>Voice</GroupHeading>
         <GeneSliders genes={[{ key: 'voicePitch', label: 'Pitch' }]} genome={genome} />
       </div>
-
-      <div className="flex flex-col gap-1.5">
-        <button
-          className="w-full rounded-full bg-primary px-3 py-2.5 font-semibold text-primary-foreground text-sm transition-transform hover:scale-[1.02] active:scale-[0.99]"
-          onClick={() => {
-            const editor = useEditor.getState()
-            editor.setTool('pets:pet')
-            editor.setMode('build')
-          }}
-          type="button"
-        >
-          Place egg
-        </button>
-        <p className="text-[11px] text-sidebar-foreground/50 leading-relaxed">
-          Click the floor to lay the egg — it hatches into this creature in about a minute.
-        </p>
-      </div>
     </div>
   )
 }
@@ -662,32 +645,53 @@ export default function PetsPanel() {
   const now = useMemo(() => Date.now(), [simTick, uiTick])
 
   return (
-    <div className="flex h-full flex-col gap-4 overflow-y-auto p-4 pb-10 text-sidebar-foreground">
-      <header className="flex flex-col gap-1">
-        <div className="flex items-center gap-2">
-          <h2 className="font-semibold text-base">Pets</h2>
-          <span className="rounded-full border border-sidebar-border/60 bg-sidebar-accent px-1.5 py-px font-semibold text-[9px] text-sidebar-foreground/70 uppercase tracking-widest">
-            Alpha
-          </span>
-        </div>
-        <p className="text-sidebar-foreground/50 text-xs leading-relaxed">
-          One-of-a-kind companions that live in the house you're building.
-        </p>
-      </header>
+    <div className="flex h-full flex-col text-sidebar-foreground">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
+        <header className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <h2 className="font-semibold text-base">Pets</h2>
+            <span className="rounded-full border border-sidebar-border/60 bg-sidebar-accent px-1.5 py-px font-semibold text-[9px] text-sidebar-foreground/70 uppercase tracking-widest">
+              Alpha
+            </span>
+          </div>
+          <p className="text-sidebar-foreground/50 text-xs leading-relaxed">
+            One-of-a-kind companions that live in the house you're building.
+          </p>
+        </header>
 
-      <SegmentedControl
-        onChange={setTab}
-        options={[
-          { label: `My pets${pets.length > 0 ? ` · ${pets.length}` : ''}`, value: 'roster' },
-          { label: 'Hatch', value: 'hatch' },
-        ]}
-        value={tab}
-      />
+        <SegmentedControl
+          onChange={setTab}
+          options={[
+            { label: `My pets${pets.length > 0 ? ` · ${pets.length}` : ''}`, value: 'roster' },
+            { label: 'Hatch', value: 'hatch' },
+          ]}
+          value={tab}
+        />
 
-      {tab === 'roster' ? (
-        <RosterTab now={now} onHatch={() => setTab('hatch')} pets={pets} poops={poops} />
-      ) : (
-        <HatchTab />
+        {tab === 'roster' ? (
+          <RosterTab now={now} onHatch={() => setTab('hatch')} pets={pets} poops={poops} />
+        ) : (
+          <HatchTab />
+        )}
+      </div>
+
+      {tab === 'hatch' && (
+        <footer className="flex flex-col gap-1.5 border-sidebar-border/60 border-t bg-sidebar p-3">
+          <button
+            className="w-full rounded-full bg-primary px-3 py-2.5 font-semibold text-primary-foreground text-sm transition-transform hover:scale-[1.02] active:scale-[0.99]"
+            onClick={() => {
+              const editor = useEditor.getState()
+              editor.setTool('pets:pet')
+              editor.setMode('build')
+            }}
+            type="button"
+          >
+            Place egg
+          </button>
+          <p className="text-[11px] text-sidebar-foreground/50 leading-relaxed">
+            Click the floor to lay the egg — it hatches into this creature in about a minute.
+          </p>
+        </footer>
       )}
     </div>
   )
