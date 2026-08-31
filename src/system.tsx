@@ -58,7 +58,7 @@ function obstacleRadius(id: string): number | null {
 }
 
 /** Distance along a 2D ray to a circle, or null when clear. */
-function rayCircleDistance(
+export function rayCircleDistance(
   fx: number,
   fz: number,
   dx: number,
@@ -80,7 +80,7 @@ function rayCircleDistance(
 }
 
 /** Distance along a 2D ray to a thick segment, or null when clear. */
-function raySegmentDistance(
+export function raySegmentDistance(
   fx: number,
   fz: number,
   dx: number,
@@ -105,7 +105,7 @@ function raySegmentDistance(
   return Math.max(0, t - pad)
 }
 
-function buildWorlds(nodes: Record<string, AnyNode>): Map<string, LevelWorld> {
+export function buildWorlds(nodes: Record<string, AnyNode>): Map<string, LevelWorld> {
   const worlds = new Map<string, LevelWorld>()
   const world = (levelId: string): LevelWorld => {
     let w = worlds.get(levelId)
