@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { AnyNode } from '@pascal-app/core'
-import { buildWorlds, rayCircleDistance, raySegmentDistance } from './system'
+import { buildWorlds, rayRectDistance, raySegmentDistance } from './system'
 
 const level = 'level_1'
 
@@ -77,20 +77,31 @@ describe('raySegmentDistance', () => {
   })
 })
 
-describe('rayCircleDistance', () => {
-  const circle = { id: 'c', cx: 0, cz: 3, r: 0.5 }
+describe('rayRectDistance', () => {
+  // A long thin table: 2 m wide, 0.4 m deep, centered at (0, 3).
+  const table = { id: 't', cx: 0, cz: 3, hx: 1, hz: 0.2 }
 
-  test('head-on approach hits before the rim', () => {
-    const d = rayCircleDistance(0, 0, 0, 1, 5, circle)
+  test('head-on approach hits at the padded near face', () => {
+    const d = rayRectDistance(0, 0, 0, 1, 5, table)
     expect(d).not.toBeNull()
-    expect(d as number).toBeCloseTo(3 - 0.5 - 0.22, 5)
+    expect(d as number).toBeCloseTo(3 - 0.2 - 0.22, 5)
   })
 
-  test('starting inside the padded circle reports contact', () => {
-    expect(rayCircleDistance(0, 2.9, 0, 1, 5, circle)).toBe(0)
+  test('the far END of a long table still blocks (the circle bug)', () => {
+    // A single bounding circle sized off the depth would have missed x=0.9.
+    const d = rayRectDistance(0.9, 0, 0, 1, 5, table)
+    expect(d).not.toBeNull()
   })
 
-  test('a tangent-missing ray is clear', () => {
-    expect(rayCircleDistance(2, 0, 0, 1, 5, circle)).toBeNull()
+  test('starting inside the padded rect reports contact', () => {
+    expect(rayRectDistance(0, 2.9, 0, 1, 5, table)).toBe(0)
+  })
+
+  test('a ray passing beside the rect is clear', () => {
+    expect(rayRectDistance(1.5, 0, 0, 1, 5, table)).toBeNull()
+  })
+
+  test('a rect beyond the probe length is clear', () => {
+    expect(rayRectDistance(0, 0, 0, 1, 2, table)).toBeNull()
   })
 })

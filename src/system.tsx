@@ -25,11 +25,12 @@ const FOLLOW_RANGE = 6
 
 type WallSeg = { ax: number; az: number; bx: number; bz: number; halfWidth: number }
 
-type CircleObstacle = { id: string; cx: number; cz: number; r: number }
+/** Axis-aligned footprint rectangle (from the item's world bbox). */
+type RectObstacle = { id: string; cx: number; cz: number; hx: number; hz: number }
 
 type LevelWorld = {
   walls: WallSeg[]
-  obstacles: CircleObstacle[]
+  obstacles: RectObstacle[]
   bowls: { id: string; pos: [number, number]; food: number }[]
   furniture: { id: string; pos: [number, number]; kind: 'bed' | 'seat' | 'hearth' }[]
   poopCount: number
@@ -38,45 +39,64 @@ type LevelWorld = {
 /** Node kinds pets must not walk through (beyond walls). */
 const OBSTACLE_TYPES = new Set(['item', 'cabinet', 'block', 'column'])
 
-// Footprint radii from the registered Object3D's bbox, cached per node — the
-// bbox traversal is too heavy for every world rebuild.
-const obstacleRadii = new Map<string, number>()
+// Footprint half-extents from the registered Object3D's bbox, cached per node
+// with a short TTL — the traversal is too heavy for every world rebuild, but
+// a resized item must not keep its stale footprint forever. The world AABB of
+// a rotated item already covers its rotation, so an axis-aligned rectangle is
+// a tight-enough hull at pet scale (a long sofa is a long rectangle now, not
+// one fat circle whose ends a pet could clip through).
+const EXTENTS_TTL_MS = 20_000
+const obstacleExtentsCache = new Map<string, { hx: number; hz: number; at: number }>()
 const bboxHelper = new Box3()
 
-function obstacleRadius(id: string): number | null {
-  const cached = obstacleRadii.get(id)
-  if (cached != null) return cached
+function obstacleExtents(id: string, now: number): { hx: number; hz: number } | null {
+  const cached = obstacleExtentsCache.get(id)
+  if (cached && now - cached.at < EXTENTS_TTL_MS) return cached
   const object = sceneRegistry.nodes.get(id)
-  if (!object) return null
+  if (!object) return cached ?? null
   bboxHelper.setFromObject(object)
-  if (bboxHelper.isEmpty()) return null
-  const sizeX = bboxHelper.max.x - bboxHelper.min.x
-  const sizeZ = bboxHelper.max.z - bboxHelper.min.z
-  const r = Math.min(1.2, Math.max(0.12, Math.max(sizeX, sizeZ) * 0.4))
-  obstacleRadii.set(id, r)
-  return r
+  if (bboxHelper.isEmpty()) return cached ?? null
+  const clamp = (v: number) => Math.min(1.6, Math.max(0.1, v))
+  const fresh = {
+    hx: clamp((bboxHelper.max.x - bboxHelper.min.x) * 0.42),
+    hz: clamp((bboxHelper.max.z - bboxHelper.min.z) * 0.42),
+    at: now,
+  }
+  obstacleExtentsCache.set(id, fresh)
+  return fresh
 }
 
-/** Distance along a 2D ray to a circle, or null when clear. */
-export function rayCircleDistance(
+/** Distance along a 2D ray to a padded axis-aligned rectangle (slab test). */
+export function rayRectDistance(
   fx: number,
   fz: number,
   dx: number,
   dz: number,
   maxDist: number,
-  circle: CircleObstacle,
+  rect: RectObstacle,
 ): number | null {
-  const ocx = fx - circle.cx
-  const ocz = fz - circle.cz
-  const r = circle.r + PET_RADIUS
-  const b = ocx * dx + ocz * dz
-  const c = ocx * ocx + ocz * ocz - r * r
-  if (c <= 0) return 0
-  const disc = b * b - c
-  if (disc < 0) return null
-  const t = -b - Math.sqrt(disc)
-  if (t < 0 || t > maxDist) return null
-  return t
+  const minX = rect.cx - rect.hx - PET_RADIUS
+  const maxX = rect.cx + rect.hx + PET_RADIUS
+  const minZ = rect.cz - rect.hz - PET_RADIUS
+  const maxZ = rect.cz + rect.hz + PET_RADIUS
+  let tMin = 0
+  let tMax = maxDist
+  for (const [from, dir, lo, hi] of [
+    [fx, dx, minX, maxX],
+    [fz, dz, minZ, maxZ],
+  ] as const) {
+    if (Math.abs(dir) < 1e-9) {
+      if (from < lo || from > hi) return null
+      continue
+    }
+    let t1 = (lo - from) / dir
+    let t2 = (hi - from) / dir
+    if (t1 > t2) [t1, t2] = [t2, t1]
+    tMin = Math.max(tMin, t1)
+    tMax = Math.min(tMax, t2)
+    if (tMin > tMax) return null
+  }
+  return tMin
 }
 
 /** Distance along a 2D ray to a thick segment, or null when clear. */
@@ -105,7 +125,10 @@ export function raySegmentDistance(
   return Math.max(0, t - pad)
 }
 
-export function buildWorlds(nodes: Record<string, AnyNode>): Map<string, LevelWorld> {
+export function buildWorlds(
+  nodes: Record<string, AnyNode>,
+  now: number = Date.now(),
+): Map<string, LevelWorld> {
   const worlds = new Map<string, LevelWorld>()
   const world = (levelId: string): LevelWorld => {
     let w = worlds.get(levelId)
@@ -161,9 +184,15 @@ export function buildWorlds(nodes: Record<string, AnyNode>): Map<string, LevelWo
       world(n.parentId).furniture.push({ id: n.id, pos: [n.position[0], n.position[2]], kind })
     }
     if (OBSTACLE_TYPES.has(n.type) && n.position) {
-      const r = obstacleRadius(n.id)
-      if (r != null) {
-        world(n.parentId).obstacles.push({ id: n.id, cx: n.position[0], cz: n.position[2], r })
+      const extents = obstacleExtents(n.id, now)
+      if (extents != null) {
+        world(n.parentId).obstacles.push({
+          id: n.id,
+          cx: n.position[0],
+          cz: n.position[2],
+          hx: extents.hx,
+          hz: extents.hz,
+        })
       }
     }
   }
@@ -365,9 +394,9 @@ export default function PetsSystem() {
           const d = raySegmentDistance(from[0], from[1], dir[0], dir[1], maxDist, seg)
           if (d != null && (best == null || d < best)) best = d
         }
-        for (const circle of world.obstacles) {
-          if (circle.id === rt.targetId) continue
-          const d = rayCircleDistance(from[0], from[1], dir[0], dir[1], maxDist, circle)
+        for (const rect of world.obstacles) {
+          if (rect.id === rt.targetId) continue
+          const d = rayRectDistance(from[0], from[1], dir[0], dir[1], maxDist, rect)
           if (d != null && (best == null || d < best)) best = d
         }
         return best
