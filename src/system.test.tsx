@@ -93,8 +93,8 @@ describe('rayRectDistance', () => {
     expect(d).not.toBeNull()
   })
 
-  test('starting inside the padded rect reports contact', () => {
-    expect(rayRectDistance(0, 2.9, 0, 1, 5, table)).toBe(0)
+  test('starting inside the padded rect is OPEN — the pet may walk out', () => {
+    expect(rayRectDistance(0, 2.9, 0, 1, 5, table)).toBeNull()
   })
 
   test('a ray passing beside the rect is clear', () => {
