@@ -1261,7 +1261,7 @@ export default function PetsPanel() {
         <SegmentedControl
           onChange={setTab}
           options={[
-            { label: `My pets${pets.length > 0 ? ` · ${pets.length}` : ''}`, value: 'roster' },
+            { label: `My Bloblins${pets.length > 0 ? ` · ${pets.length}` : ''}`, value: 'roster' },
             { label: 'Hatch', value: 'hatch' },
           ]}
           value={tab}
