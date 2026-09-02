@@ -209,6 +209,24 @@ export function buildWorlds(
 }
 
 const cameraWorld = new Vector3()
+const petWorld = new Vector3()
+
+/**
+ * Pointer-grab tracking that owes nothing to the R3F event graph: the window
+ * press is recorded here, and the frame loop freezes any pet whose projected
+ * screen position sits under the cursor at press time. Helper planes, drag
+ * overlays and gizmos can eat pointer events — screen geometry can't lie.
+ */
+const pointerGrab = {
+  buttonDown: false,
+  pressAt: 0,
+  x: 0,
+  y: 0,
+}
+/** How close (px) the press must be to the pet's projected center to grab. */
+const GRAB_RADIUS_PX = 52
+/** The press-to-grab window: projections are checked for this long. */
+const GRAB_WINDOW_MS = 280
 
 // One-shot nap raycast scratch objects — never allocated per nap.
 const napRaycaster = new Raycaster()
@@ -328,8 +346,33 @@ export default function PetsSystem() {
     }
 
     const flush = () => commitStats()
+    const onPointerDown = (event: PointerEvent) => {
+      if (process.env.NODE_ENV !== 'production') {
+        ;((globalThis as { __petsDebug?: Record<string, unknown> }).__petsDebug ??= {}).press = {
+          at: Date.now(),
+          button: event.button,
+        }
+      }
+      if (event.button !== 0) return
+      pointerGrab.buttonDown = true
+      pointerGrab.pressAt = Date.now()
+      pointerGrab.x = event.clientX
+      pointerGrab.y = event.clientY
+    }
+    const onPointerUp = () => {
+      pointerGrab.buttonDown = false
+      heldPets.clear()
+    }
     window.addEventListener('beforeunload', flush)
-    return () => window.removeEventListener('beforeunload', flush)
+    window.addEventListener('pointerdown', onPointerDown, true)
+    window.addEventListener('pointerup', onPointerUp, true)
+    window.addEventListener('pointercancel', onPointerUp, true)
+    return () => {
+      window.removeEventListener('beforeunload', flush)
+      window.removeEventListener('pointerdown', onPointerDown, true)
+      window.removeEventListener('pointerup', onPointerUp, true)
+      window.removeEventListener('pointercancel', onPointerUp, true)
+    }
   }, [])
 
   useFrame((state, dt) => {
@@ -403,6 +446,45 @@ export default function PetsSystem() {
       // A selected pet sits still with its node position snapped to where it
       // actually stands, so the move gizmo grabs the pet, not the stale home
       // anchor it wandered away from.
+      // Grab check: within the press window, project the pet to screen and
+      // compare against the pointer; a grabbed pet stays grabbed (and still)
+      // until the button is released, wherever the drag goes.
+      if (
+        pointerGrab.buttonDown &&
+        now - pointerGrab.pressAt < GRAB_WINDOW_MS &&
+        !heldPets.has(pet.id)
+      ) {
+        const level = sceneRegistry.nodes.get(levelId)
+        if (level) {
+          petWorld.set(rt.pos[0], 0.2, rt.pos[1])
+          level.localToWorld(petWorld)
+          petWorld.project(state.camera)
+          // Window coordinates, not canvas-local — the press was captured on
+          // window, and the canvas sits right of the panel rail.
+          const rect = state.gl.domElement.getBoundingClientRect()
+          const sx = rect.left + ((petWorld.x + 1) / 2) * rect.width
+          const sy = rect.top + ((1 - petWorld.y) / 2) * rect.height
+          // Radius scales with the pet's on-screen size so a zoomed-in pet is
+          // grabbable across its whole body, not just a 52px core.
+          petWorld.set(rt.pos[0], 0.65, rt.pos[1])
+          level.localToWorld(petWorld)
+          petWorld.project(state.camera)
+          const topY = rect.top + ((1 - petWorld.y) / 2) * rect.height
+          const grabRadius = Math.max(GRAB_RADIUS_PX, Math.abs(sy - topY) * 1.1)
+          const grabDist = Math.hypot(sx - pointerGrab.x, sy - pointerGrab.y)
+          if (process.env.NODE_ENV !== 'production') {
+            ;((globalThis as { __petsDebug?: Record<string, unknown> }).__petsDebug ??= {}).grab = {
+              dist: grabDist.toFixed(1),
+              press: [pointerGrab.x, pointerGrab.y],
+              proj: [sx.toFixed(0), sy.toFixed(0)],
+            }
+          }
+          if (grabDist < grabRadius) {
+            heldPets.add(pet.id)
+          }
+        }
+      }
+
       const liveOverride = liveOverrides.get(pet.id) as
         | { position?: [number, number, number] }
         | undefined
@@ -417,6 +499,20 @@ export default function PetsSystem() {
         liveOverride?.position != null ||
         now - (homeMovedAt.current.get(pet.id) ?? 0) < 600
       const selected = selectedIds.has(pet.id) || movingId === pet.id || dragging
+      if (process.env.NODE_ENV !== 'production') {
+        ;((globalThis as { __petsDebug?: Record<string, unknown> }).__petsDebug ??= {})[pet.id] = {
+          activity: rt.activity,
+          dragging,
+          frozen: selected,
+          held: heldPets.has(pet.id),
+          homeMovedAgo: now - (homeMovedAt.current.get(pet.id) ?? 0),
+          inSelection: selectedIds.has(pet.id),
+          liveOverride: liveOverride?.position != null,
+          movingNode: movingId === pet.id,
+          pos: [rt.pos[0].toFixed(2), rt.pos[1].toFixed(2)],
+          speed: rt.speed.toFixed(2),
+        }
+      }
       if (selected) {
         if (!prevSelected.current.has(pet.id)) {
           prevSelected.current.add(pet.id)

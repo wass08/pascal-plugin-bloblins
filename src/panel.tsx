@@ -1057,7 +1057,7 @@ function HatchTab() {
   }, [spinTick])
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3 p-4 pb-0">
       <div
         className="relative aspect-square w-full cursor-grab touch-none overflow-hidden rounded-xl border border-sidebar-border/60 bg-sidebar-accent/40 active:cursor-grabbing"
         onDoubleClick={() => {
@@ -1132,64 +1132,66 @@ function HatchTab() {
         🎲 Surprise me
       </button>
 
-      <div className="flex flex-col gap-1">
-        <GroupHeading>Body</GroupHeading>
-        <GeneSliders genes={BODY_GENES} genome={genome} />
-        <ChipRow
-          label="Shape"
-          onChange={(bodyShape) => patchDraft({ bodyShape })}
-          options={BODY_SHAPES}
-          value={genome.bodyShape}
-        />
-      </div>
+      <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-1 pb-3">
+        <div className="flex flex-col gap-1">
+          <GroupHeading>Body</GroupHeading>
+          <GeneSliders genes={BODY_GENES} genome={genome} />
+          <ChipRow
+            label="Shape"
+            onChange={(bodyShape) => patchDraft({ bodyShape })}
+            options={BODY_SHAPES}
+            value={genome.bodyShape}
+          />
+        </div>
 
-      <div className="flex flex-col gap-1">
-        <GroupHeading>Face</GroupHeading>
-        <GeneSliders genes={FACE_GENES} genome={genome} />
-        <ChipRow
-          label="Style"
-          onChange={(eyeStyle) => patchDraft({ eyeStyle })}
-          options={EYE_STYLES}
-          value={genome.eyeStyle}
-        />
-      </div>
+        <div className="flex flex-col gap-1">
+          <GroupHeading>Face</GroupHeading>
+          <GeneSliders genes={FACE_GENES} genome={genome} />
+          <ChipRow
+            label="Style"
+            onChange={(eyeStyle) => patchDraft({ eyeStyle })}
+            options={EYE_STYLES}
+            value={genome.eyeStyle}
+          />
+        </div>
 
-      <div className="flex flex-col gap-1.5">
-        <GroupHeading>Ears &amp; tail</GroupHeading>
-        <GeneSliders genes={[{ key: 'earSize', label: 'Ear size' }]} genome={genome} />
-        <ChipRow
-          label="Ears"
-          onChange={(earType) => patchDraft({ earType })}
-          options={EAR_TYPES}
-          value={genome.earType}
-        />
-        <ChipRow
-          label="Tail"
-          onChange={(tailType) => patchDraft({ tailType })}
-          options={TAIL_TYPES}
-          value={genome.tailType}
-        />
-        <ChipRow
-          label="Topper"
-          onChange={(topper) => patchDraft({ topper })}
-          options={TOPPERS}
-          value={genome.topper}
-        />
-      </div>
+        <div className="flex flex-col gap-1.5">
+          <GroupHeading>Ears &amp; tail</GroupHeading>
+          <GeneSliders genes={[{ key: 'earSize', label: 'Ear size' }]} genome={genome} />
+          <ChipRow
+            label="Ears"
+            onChange={(earType) => patchDraft({ earType })}
+            options={EAR_TYPES}
+            value={genome.earType}
+          />
+          <ChipRow
+            label="Tail"
+            onChange={(tailType) => patchDraft({ tailType })}
+            options={TAIL_TYPES}
+            value={genome.tailType}
+          />
+          <ChipRow
+            label="Topper"
+            onChange={(topper) => patchDraft({ topper })}
+            options={TOPPERS}
+            value={genome.topper}
+          />
+        </div>
 
-      <div className="flex flex-col gap-1.5">
-        <GroupHeading>Colors</GroupHeading>
-        <GeneSliders genes={COLOR_GENES} genome={genome} />
-        <SegmentedControl
-          onChange={(pattern) => patchDraft({ pattern })}
-          options={PATTERNS.map((pattern) => ({ label: sentence(pattern), value: pattern }))}
-          value={genome.pattern}
-        />
-      </div>
+        <div className="flex flex-col gap-1.5">
+          <GroupHeading>Colors</GroupHeading>
+          <GeneSliders genes={COLOR_GENES} genome={genome} />
+          <SegmentedControl
+            onChange={(pattern) => patchDraft({ pattern })}
+            options={PATTERNS.map((pattern) => ({ label: sentence(pattern), value: pattern }))}
+            value={genome.pattern}
+          />
+        </div>
 
-      <div className="flex flex-col gap-1">
-        <GroupHeading>Voice</GroupHeading>
-        <GeneSliders genes={[{ key: 'voicePitch', label: 'Pitch' }]} genome={genome} />
+        <div className="flex flex-col gap-1">
+          <GroupHeading>Voice</GroupHeading>
+          <GeneSliders genes={[{ key: 'voicePitch', label: 'Pitch' }]} genome={genome} />
+        </div>
       </div>
     </div>
   )
@@ -1266,13 +1268,13 @@ export default function PetsPanel() {
         />
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
-        {tab === 'roster' ? (
+      {tab === 'roster' ? (
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
           <RosterTab now={now} onHatch={() => setTab('hatch')} pets={pets} poops={poops} />
-        ) : (
-          <HatchTab />
-        )}
-      </div>
+        </div>
+      ) : (
+        <HatchTab />
+      )}
 
       {tab === 'hatch' && (
         <footer className="flex flex-col gap-1.5 border-sidebar-border/60 border-t bg-sidebar p-3">
