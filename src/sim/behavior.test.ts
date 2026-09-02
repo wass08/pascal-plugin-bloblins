@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { PetRuntime } from '../store'
-import { ARRIVE_DIST, type BehaviorContext, stepBehavior } from './behavior'
+import { ARRIVE_DIST, type BehaviorContext, BOWL_ARRIVE, stepBehavior } from './behavior'
 
 function runtime(overrides: Partial<PetRuntime> = {}): PetRuntime {
   return {
@@ -55,7 +55,7 @@ describe('behavior state machine', () => {
         now: 2000,
         stats: { fullness: 0.2, happiness: 0.8, energy: 0.8 },
         bowls: [bowl],
-        distToTarget: ARRIVE_DIST,
+        distToTarget: BOWL_ARRIVE,
       }),
     )
     expect(eating.activity).toBe('eating')

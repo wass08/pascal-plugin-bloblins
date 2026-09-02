@@ -1243,7 +1243,7 @@ export default function PetsPanel() {
 
   return (
     <div className="flex h-full flex-col text-sidebar-foreground">
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
+      <div className="flex flex-col gap-4 p-4 pb-0">
         <header className="flex flex-col gap-1">
           <div className="flex items-center gap-2">
             <h2 className="font-semibold text-base">Pets</h2>
@@ -1264,7 +1264,9 @@ export default function PetsPanel() {
           ]}
           value={tab}
         />
+      </div>
 
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
         {tab === 'roster' ? (
           <RosterTab now={now} onHatch={() => setTab('hatch')} pets={pets} poops={poops} />
         ) : (

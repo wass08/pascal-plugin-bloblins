@@ -292,7 +292,12 @@ export default function PetRenderer({ node }: { node: PetNode }) {
 
     // Idle flourishes: every several seconds a loitering pet does something
     // small and finite. Transient by construction — one enum in a ref.
+    // A held pet performs NOTHING — hopping in the user's hand reads as
+    // trying to walk away.
+    const held = heldPets.has(node.id)
+    if (held && a.flourish) a.flourish = null
     const loitering =
+      !held &&
       (rt == null || rt.activity === 'idle' || rt.activity === 'wander') &&
       (rt == null || now >= rt.singingUntil)
     if (a.flourish == null && loitering && !napping && now > a.nextFlourishAt) {
@@ -326,7 +331,7 @@ export default function PetRenderer({ node }: { node: PetNode }) {
 
     // Singing: a little metronome dance for the whole song — side sway on the
     // beat, bounce on the off-beat, and a slow face-the-room turn.
-    if (rt && now < rt.singingUntil) {
+    if (!held && rt && now < rt.singingUntil) {
       const beatT = t * Math.PI * 2 * 2.1
       leanZ += Math.sin(beatT) * 0.12
       stretch += Math.max(0, Math.sin(beatT * 2)) * 0.05
