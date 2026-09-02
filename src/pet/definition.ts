@@ -57,9 +57,9 @@ export const petDefinition: NodeDefinition<typeof PetNode> & Record<string, unkn
   preview: () => import('./preview'),
   presentation: {
     findInCatalog: false,
-    label: 'Pet',
-    description: 'A procedural companion hatched from a one-of-a-kind egg.',
-    icon: { kind: 'iconify', name: 'lucide:cat' },
+    label: 'Bloblin',
+    description: 'A clay Bloblin hatched from a one-of-a-kind egg.',
+    icon: { kind: 'iconify', name: 'lucide:ghost' },
     paletteSection: 'furnish',
     // Placement goes through the Pets panel so the egg carries the builder's
     // draft genome; the palette would place default-DNA clones.

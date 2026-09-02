@@ -1,14 +1,14 @@
 {
-  "name": "@wass08/plugin-pets",
+  "name": "@wass08/plugin-bloblins",
   "version": "0.1.0",
-  "description": "Pets — procedural tamagotchi-style companions for Pascal. Hatch a one-of-a-kind creature from its DNA and it lives in the house you're building: wanders your rooms, eats, naps on your furniture, poops, sings, and follows you in walkthrough.",
+  "description": "Bloblins — procedural tamagotchi-style clay companions for Pascal. Hatch a one-of-a-kind creature from its DNA and it lives in the house you're building: wanders your rooms, eats, naps on your furniture, poops, sings, and follows you in walkthrough.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/wass08/pascal-plugin-pets.git"
+    "url": "git+https://github.com/wass08/pascal-plugin-bloblins.git"
   },
-  "homepage": "https://github.com/wass08/pascal-plugin-pets",
+  "homepage": "https://github.com/wass08/pascal-plugin-bloblins",
   "bugs": {
-    "url": "https://github.com/wass08/pascal-plugin-pets/issues"
+    "url": "https://github.com/wass08/pascal-plugin-bloblins/issues"
   },
   "type": "module",
   "main": "./src/index.ts",
@@ -60,6 +60,7 @@
     "3d",
     "editor",
     "plugin",
+    "bloblins",
     "pets",
     "tamagotchi",
     "procedural"

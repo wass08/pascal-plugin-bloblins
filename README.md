@@ -1,4 +1,4 @@
-# Pets — a Pascal plugin
+# Bloblins — a Pascal plugin
 
 Procedural tamagotchi-style companions for [Pascal](https://editor.pascal.app).
 Hatch a one-of-a-kind creature from its DNA and it lives in the house you're
@@ -8,11 +8,12 @@ and follows you around in walkthrough mode. Stats run in real time — come back
 tomorrow and someone will be hungry — but pets never die.
 
 Built on Pascal's public [Plugin API v1](https://editor.pascal.app/docs/developers/plugins):
-three node kinds (`pets:pet`, `pets:bowl`, `pets:poop`) plus a Pets editor panel
+three node kinds (`pets:pet`, `pets:bowl`, `pets:poop` — internal ids keep the
+original `pets:` prefix for scene compatibility) plus a Bloblins editor panel
 with the genome builder and the pet roster.
 
 - **Publisher**: Wassim Samad ([@wass08](https://github.com/wass08))
-- **Support**: [issues](https://github.com/wass08/pascal-plugin-pets/issues)
+- **Support**: [issues](https://github.com/wass08/pascal-plugin-bloblins/issues)
 - **Capabilities**: scene nodes, editor panel, per-frame system, procedural
   WebAudio sound. No network calls, no external origins, no account data.
 - **Persisted project data**: pet DNA, name, care stats, and timestamps on

@@ -35,15 +35,15 @@ type PluginHostPanel = {
 
 export const petsHostPanel: PluginHostPanel = {
   id: 'wass08:pets:panel',
-  label: 'Pets',
+  label: 'Bloblins',
   description:
-    'Hatch one-of-a-kind procedural companions that live in your house — they wander your rooms, eat, nap on your furniture, sing, and need you to clean up after them.',
-  icon: { kind: 'iconify', name: 'lucide:paw-print' },
+    'Hatch one-of-a-kind clay Bloblins that live in your house — they wander your rooms, eat, nap on your furniture, sing their own songs, and need you to clean up after them.',
+  icon: { kind: 'iconify', name: 'lucide:ghost' },
   component: () => import('./panel'),
   kinds: ['pets:pet', 'pets:bowl', 'pets:poop'],
   pluginId: 'wass08:pets',
   creator: { name: 'Wassim Samad', url: 'https://github.com/wass08' },
-  pluginUrl: 'https://github.com/wass08/pascal-plugin-pets',
+  pluginUrl: 'https://github.com/wass08/pascal-plugin-bloblins',
   defaultInstalled: false,
 }
 

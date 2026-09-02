@@ -1,7 +1,7 @@
-# Pets — architecture spec
+# Bloblins — architecture spec
 
 Tamagotchi-style procedural companions for Pascal, shipped as a third-party plugin
-(`@wass08/plugin-pets`, plugin id `wass08:pets`). This file is the contract between
+(`@wass08/plugin-bloblins`, plugin id `wass08:pets` — internal ids keep the pets prefix for scene compatibility). This file is the contract between
 modules; module owners implement against it without needing the rest of the tree.
 
 ## Locked product decisions

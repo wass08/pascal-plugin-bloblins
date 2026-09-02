@@ -48,8 +48,8 @@ export const bowlDefinition: NodeDefinition<typeof BowlNode> & Record<string, un
   renderer: { kind: 'parametric', module: () => import('./renderer') },
   presentation: {
     findInCatalog: false,
-    label: 'Pet bowl',
-    description: 'Keep it filled — hungry pets walk over to eat from it.',
+    label: 'Bloblin bowl',
+    description: 'Keep it filled — hungry Bloblins walk over to eat from it.',
     icon: { kind: 'iconify', name: 'lucide:soup' },
     paletteSection: 'furnish',
   },
