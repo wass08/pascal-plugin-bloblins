@@ -7,7 +7,7 @@ import {
   useLiveNodeOverrides,
   useScene,
 } from '@pascal-app/core'
-import { useEditor } from '@pascal-app/editor'
+import { getMovingNode } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
@@ -392,10 +392,12 @@ export default function PetsSystem() {
 
     const selectedIds = new Set(useViewer.getState().selection.selectedIds as readonly string[])
     const liveOverrides = useLiveNodeOverrides.getState()
-    // A pet mid-drag freezes exactly like a selected one — no strolling away
-    // from under the move gizmo.
-    const movingId =
-      (useEditor.getState() as { movingNode?: { id?: string } | null }).movingNode?.id ?? null
+    // A pet being carried by the move tool freezes like a selected one. The
+    // moving node lives in the host's dedicated interaction-scope store —
+    // useEditor has no such field (it silently read undefined for weeks).
+    const movingId: string | null =
+      (typeof getMovingNode === 'function' ? (getMovingNode()?.id as string | undefined) : null) ??
+      null
 
     for (const node of Object.values(scene.nodes)) {
       if ((node as { type?: string }).type !== 'pets:pet') continue
@@ -508,6 +510,7 @@ export default function PetsSystem() {
           homeMovedAgo: now - (homeMovedAt.current.get(pet.id) ?? 0),
           inSelection: selectedIds.has(pet.id),
           liveOverride: liveOverride?.position != null,
+          movingId,
           movingNode: movingId === pet.id,
           pos: [rt.pos[0].toFixed(2), rt.pos[1].toFixed(2)],
           speed: rt.speed.toFixed(2),
