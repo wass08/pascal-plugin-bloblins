@@ -296,21 +296,51 @@ function partColor(role: BodyPartColor, colors: ReturnType<typeof genomeColors>)
 }
 
 /** Shared between the drag handlers (DOM) and the turntable (R3F frame loop). */
-type PreviewControl = { angle: number; auto: boolean }
+type PreviewControl = {
+  angle: number
+  auto: boolean
+  /** Target angle of a Surprise-me victory spin; null when not spinning. */
+  spinTo: number | null
+  /** When to quietly resume auto-rotate after a manual drag; null = don't. */
+  resumeAt: number | null
+  dragging: boolean
+}
+
+const TAU = Math.PI * 2
 
 function PreviewCreature({
   control,
   genome,
+  onAutoChange,
 }: {
   control: React.MutableRefObject<PreviewControl>
   genome: PetGenome
+  onAutoChange: (auto: boolean) => void
 }) {
   const spec = useMemo(() => buildBodySpec(genome, 1), [genome])
   const colors = useMemo(() => genomeColors(genome), [genome])
   const turntable = useRef<Group>(null)
   useFrame((_, delta) => {
-    if (control.current.auto) control.current.angle += delta * 0.5
-    if (turntable.current) turntable.current.rotation.y = control.current.angle
+    const c = control.current
+    if (c.spinTo != null) {
+      // Ease out toward the target, with a linear floor so the spin always
+      // lands instead of asymptoting forever.
+      const remaining = c.spinTo - c.angle
+      c.angle += Math.min(remaining, Math.max(remaining * Math.min(1, delta * 3.2), delta * 1.5))
+      if (c.spinTo - c.angle < 0.01) {
+        c.angle = 0
+        c.spinTo = null
+        c.auto = true
+        onAutoChange(true)
+      }
+    } else if (!(c.auto || c.dragging) && c.resumeAt != null && Date.now() > c.resumeAt) {
+      c.resumeAt = null
+      c.auto = true
+      onAutoChange(true)
+    } else if (c.auto) {
+      c.angle += delta * 0.5
+    }
+    if (turntable.current) turntable.current.rotation.y = c.angle
   })
   // Normalize height to 1 unit so a tiny genome and a huge one both fill the
   // same frame; the inner group then straddles the origin.
@@ -440,7 +470,13 @@ function HatchTab() {
   const draftName = usePets((s) => s.draftName)
   // R3F cannot render on the server; mount the preview after hydration.
   const [mounted, setMounted] = useState(false)
-  const control = useRef<PreviewControl>({ angle: 0, auto: true })
+  const control = useRef<PreviewControl>({
+    angle: 0,
+    auto: true,
+    spinTo: null,
+    resumeAt: null,
+    dragging: false,
+  })
   const [autoRotate, setAutoRotate] = useState(true)
   const drag = useRef<{ active: boolean; lastX: number }>({ active: false, lastX: 0 })
   useEffect(() => {
@@ -455,6 +491,14 @@ function HatchTab() {
     setAutoRotate(false)
   }
 
+  /** Surprise-me flourish: three quick turns landing face-front, then auto. */
+  const victorySpin = () => {
+    const c = control.current
+    c.auto = false
+    c.resumeAt = null
+    c.spinTo = Math.ceil((c.angle + 3 * TAU) / TAU) * TAU
+  }
+
   return (
     <div className="flex flex-col gap-3">
       <div
@@ -462,9 +506,12 @@ function HatchTab() {
         onDoubleClick={() => {
           control.current.angle = 0
           stopAuto()
+          control.current.resumeAt = Date.now() + 2500
         }}
         onPointerDown={(e) => {
           drag.current = { active: true, lastX: e.clientX }
+          control.current.dragging = true
+          control.current.spinTo = null
           e.currentTarget.setPointerCapture(e.pointerId)
         }}
         onPointerMove={(e) => {
@@ -476,6 +523,8 @@ function HatchTab() {
         }}
         onPointerUp={() => {
           drag.current.active = false
+          control.current.dragging = false
+          if (!control.current.auto) control.current.resumeAt = Date.now() + 2500
         }}
         title="Drag to rotate · double-click to face front"
       >
@@ -489,13 +538,15 @@ function HatchTab() {
             <ambientLight intensity={1.2} />
             <directionalLight intensity={2} position={[2.5, 4, 3]} />
             <directionalLight intensity={0.5} position={[-3, 1.5, -2]} />
-            <PreviewCreature control={control} genome={genome} />
+            <PreviewCreature control={control} genome={genome} onAutoChange={setAutoRotate} />
           </Canvas>
         )}
         <button
           className={`absolute right-1.5 bottom-1.5 rounded-full border border-sidebar-border/60 bg-sidebar/80 px-2 py-0.5 text-[10px] backdrop-blur transition-colors hover:bg-sidebar-accent ${autoRotate ? 'text-sidebar-foreground' : 'text-sidebar-foreground/40'}`}
           onClick={() => {
             control.current.auto = !control.current.auto
+            control.current.resumeAt = null
+            control.current.spinTo = null
             setAutoRotate(control.current.auto)
           }}
           onPointerDown={(e) => e.stopPropagation()}
@@ -526,6 +577,7 @@ function HatchTab() {
       <button
         className="rounded-full border border-sidebar-border/60 px-3 py-1.5 text-xs transition-colors hover:bg-sidebar-accent"
         onClick={() => {
+          victorySpin()
           const pets = usePets.getState()
           pets.setDraftGenome(randomGenome())
           pets.setDraftName(randomPetName())

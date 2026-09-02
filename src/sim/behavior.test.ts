@@ -15,6 +15,7 @@ function runtime(overrides: Partial<PetRuntime> = {}): PetRuntime {
     lastVocalAt: 0,
     lastSongAt: 0,
     lastNapAt: 0,
+    napSurface: null,
     singingUntil: 0,
     lastPatAt: 0,
     ...overrides,

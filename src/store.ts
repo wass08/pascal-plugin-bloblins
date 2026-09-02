@@ -40,6 +40,12 @@ export type PetRuntime = {
   lastNapAt: number
   /** epoch ms until which the pet is mid-song — drives the dance sway */
   singingUntil: number
+  /**
+   * Where a furniture nap actually happens: a point on TOP of the furniture,
+   * found by a one-shot raycast when the nap starts (level-local; y is the
+   * surface height). null = napping on the ground / not napping.
+   */
+  napSurface: { x: number; y: number; z: number } | null
   /** transient pat feedback: epoch ms of the last pat, drives squash + hearts */
   lastPatAt: number
 }
@@ -64,6 +70,7 @@ export function ensureRuntime(id: string, home: [number, number]): PetRuntime {
       // not the moment the pet loads.
       lastNapAt: Date.now(),
       singingUntil: 0,
+      napSurface: null,
       lastPatAt: 0,
     }
     petRuntimes.set(id, runtime)
