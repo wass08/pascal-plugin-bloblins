@@ -3,6 +3,8 @@ import type { Activity, Emote, PetRuntime } from '../store'
 import { moodOf } from './stats'
 
 export const ARRIVE_DIST = 0.35
+/** Plates are eaten from BESIDE, not from inside — arrive at munching range. */
+export const BOWL_ARRIVE = 0.55
 
 export type BehaviorContext = {
   now: number
@@ -130,7 +132,7 @@ export function stepBehavior(rt: PetRuntime, ctx: BehaviorContext): BehaviorResu
       (candidate) => candidate.id === rt.targetId && candidate.food > 0.05,
     )
     if (served) {
-      if (ctx.distToTarget != null && ctx.distToTarget <= ARRIVE_DIST) {
+      if (ctx.distToTarget != null && ctx.distToTarget <= BOWL_ARRIVE) {
         return result(ctx, 'eating', ctx.now + 4000, served.id, served.pos, 'food')
       }
       return result(ctx, 'seek-bowl', rt.activityUntil, served.id, served.pos, 'food')
@@ -152,7 +154,7 @@ export function stepBehavior(rt: PetRuntime, ctx: BehaviorContext): BehaviorResu
         rt.activity === 'seek-bowl' &&
         rt.targetId === bowl.id &&
         ctx.distToTarget != null &&
-        ctx.distToTarget <= ARRIVE_DIST
+        ctx.distToTarget <= BOWL_ARRIVE
       ) {
         return result(ctx, 'eating', ctx.now + 4000, bowl.id, bowl.pos, 'food')
       }

@@ -830,13 +830,19 @@ function partColor(role: BodyPartColor, colors: ReturnType<typeof genomeColors>)
   return colors.body
 }
 
-/** Shared between the drag handlers (DOM) and the turntable (R3F frame loop). */
+/**
+ * Shared between the drag handlers (DOM) and the turntable (R3F frame loop).
+ * The creature idles FRONT-FACING with a gentle sway; a drag takes manual
+ * control (and eases back to front a beat after release); a reroll does a
+ * three-turn victory spin that lands facing front again.
+ */
 type PreviewControl = {
+  mode: 'sway' | 'manual' | 'spin'
   angle: number
-  auto: boolean
-  /** Target angle of a Surprise-me victory spin; null when not spinning. */
+  /** Yaw actually shown last frame — where a grab or spin starts from. */
+  shownYaw: number
   spinTo: number | null
-  /** When to quietly resume auto-rotate after a manual drag; null = don't. */
+  /** After a drag, when to ease back to front and resume the sway. */
   resumeAt: number | null
   dragging: boolean
 }
@@ -846,18 +852,17 @@ const TAU = Math.PI * 2
 function PreviewCreature({
   control,
   genome,
-  onAutoChange,
 }: {
   control: React.MutableRefObject<PreviewControl>
   genome: PetGenome
-  onAutoChange: (auto: boolean) => void
 }) {
   const spec = useMemo(() => buildBodySpec(genome, 1), [genome])
   const colors = useMemo(() => genomeColors(genome), [genome])
   const turntable = useRef<Group>(null)
-  useFrame((_, delta) => {
+  const swayWeight = useRef(1)
+  useFrame((state, delta) => {
     const c = control.current
-    if (c.spinTo != null) {
+    if (c.mode === 'spin' && c.spinTo != null) {
       // Ease out toward the target, with a linear floor so the spin always
       // lands instead of asymptoting forever.
       const remaining = c.spinTo - c.angle
@@ -865,17 +870,30 @@ function PreviewCreature({
       if (c.spinTo - c.angle < 0.01) {
         c.angle = 0
         c.spinTo = null
-        c.auto = true
-        onAutoChange(true)
+        c.mode = 'sway'
       }
-    } else if (!(c.auto || c.dragging) && c.resumeAt != null && Date.now() > c.resumeAt) {
-      c.resumeAt = null
-      c.auto = true
-      onAutoChange(true)
-    } else if (c.auto) {
-      c.angle += delta * 0.5
+    } else if (c.mode === 'manual' && !c.dragging && c.resumeAt != null) {
+      if (Date.now() > c.resumeAt) {
+        // Ease home, then hand back to the sway.
+        c.angle += (0 - c.angle) * Math.min(1, delta * 3.5)
+        if (Math.abs(c.angle) < 0.02) {
+          c.angle = 0
+          c.resumeAt = null
+          c.mode = 'sway'
+        }
+      }
     }
-    if (turntable.current) turntable.current.rotation.y = c.angle
+    const t = state.clock.getElapsedTime()
+    const swayTarget = c.mode === 'sway' ? 1 : 0
+    swayWeight.current += (swayTarget - swayWeight.current) * Math.min(1, delta * 2.5)
+    const w = swayWeight.current
+    const yaw = c.angle * (1 - w) + Math.sin(t * 0.55) * 0.38 * w
+    const pitch = Math.sin(t * 0.83 + 1.3) * 0.05 * w
+    c.shownYaw = yaw
+    if (turntable.current) {
+      turntable.current.rotation.y = yaw
+      turntable.current.rotation.x = pitch
+    }
   })
   // Normalize height to 1 unit so a tiny genome and a huge one both fill the
   // same frame; the inner group then straddles the origin.
@@ -1006,14 +1024,15 @@ function HatchTab() {
   // R3F cannot render on the server; mount the preview after hydration.
   const [mounted, setMounted] = useState(false)
   const control = useRef<PreviewControl>({
+    mode: 'sway',
     angle: 0,
-    auto: true,
+    shownYaw: 0,
     spinTo: null,
     resumeAt: null,
     dragging: false,
   })
-  const [autoRotate, setAutoRotate] = useState(true)
   const drag = useRef<{ active: boolean; lastX: number }>({ active: false, lastX: 0 })
+  const spinTick = usePets((s) => s.previewSpinTick)
   useEffect(() => {
     setMounted(true)
     // 'Pip' is the store's placeholder, not a choice anyone made — roll a real
@@ -1021,47 +1040,47 @@ function HatchTab() {
     if (usePets.getState().draftName === 'Pip') usePets.getState().setDraftName(randomPetName())
   }, [])
 
-  const stopAuto = () => {
-    control.current.auto = false
-    setAutoRotate(false)
-  }
-
-  /** Surprise-me flourish: three quick turns landing face-front, then auto. */
-  const victorySpin = () => {
+  // Every reroll (Surprise me, or the tool rerolling after an egg is placed)
+  // bumps previewSpinTick — spin three eased turns and land facing front.
+  useEffect(() => {
+    if (spinTick === 0) return
     const c = control.current
-    c.auto = false
+    c.mode = 'spin'
     c.resumeAt = null
+    c.angle = c.shownYaw
     c.spinTo = Math.ceil((c.angle + 3 * TAU) / TAU) * TAU
-  }
+  }, [spinTick])
 
   return (
     <div className="flex flex-col gap-3">
       <div
         className="relative aspect-square w-full cursor-grab touch-none overflow-hidden rounded-xl border border-sidebar-border/60 bg-sidebar-accent/40 active:cursor-grabbing"
         onDoubleClick={() => {
-          control.current.angle = 0
-          stopAuto()
-          control.current.resumeAt = Date.now() + 2500
+          const c = control.current
+          c.mode = 'manual'
+          c.angle = 0
+          c.resumeAt = Date.now()
         }}
         onPointerDown={(e) => {
+          const c = control.current
           drag.current = { active: true, lastX: e.clientX }
-          control.current.dragging = true
-          control.current.spinTo = null
+          c.dragging = true
+          c.spinTo = null
+          c.angle = c.shownYaw
+          c.mode = 'manual'
           e.currentTarget.setPointerCapture(e.pointerId)
         }}
         onPointerMove={(e) => {
           if (!drag.current.active) return
-          const dx = e.clientX - drag.current.lastX
-          if (dx !== 0 && control.current.auto) stopAuto()
-          control.current.angle += dx * 0.012
+          control.current.angle += (e.clientX - drag.current.lastX) * 0.012
           drag.current.lastX = e.clientX
         }}
         onPointerUp={() => {
           drag.current.active = false
           control.current.dragging = false
-          if (!control.current.auto) control.current.resumeAt = Date.now() + 2500
+          control.current.resumeAt = Date.now() + 2500
         }}
-        title="Drag to rotate · double-click to face front"
+        title="Drag to look around — it settles back on its own"
       >
         {mounted && (
           <Canvas
@@ -1073,23 +1092,9 @@ function HatchTab() {
             <ambientLight intensity={1.2} />
             <directionalLight intensity={2} position={[2.5, 4, 3]} />
             <directionalLight intensity={0.5} position={[-3, 1.5, -2]} />
-            <PreviewCreature control={control} genome={genome} onAutoChange={setAutoRotate} />
+            <PreviewCreature control={control} genome={genome} />
           </Canvas>
         )}
-        <button
-          className={`absolute right-1.5 bottom-1.5 rounded-full border border-sidebar-border/60 bg-sidebar/80 px-2 py-0.5 text-[10px] backdrop-blur transition-colors hover:bg-sidebar-accent ${autoRotate ? 'text-sidebar-foreground' : 'text-sidebar-foreground/40'}`}
-          onClick={() => {
-            control.current.auto = !control.current.auto
-            control.current.resumeAt = null
-            control.current.spinTo = null
-            setAutoRotate(control.current.auto)
-          }}
-          onPointerDown={(e) => e.stopPropagation()}
-          title={autoRotate ? 'Stop auto-rotate' : 'Start auto-rotate'}
-          type="button"
-        >
-          {autoRotate ? '⟳ auto' : '⟳ off'}
-        </button>
       </div>
 
       <div className="flex items-center gap-1.5">
@@ -1112,8 +1117,8 @@ function HatchTab() {
       <button
         className="rounded-full border border-sidebar-border/60 px-3 py-1.5 text-xs transition-colors hover:bg-sidebar-accent"
         onClick={() => {
-          victorySpin()
           const pets = usePets.getState()
+          pets.bumpPreviewSpin()
           pets.setDraftGenome(randomGenome())
           pets.setDraftName(randomPetName())
         }}

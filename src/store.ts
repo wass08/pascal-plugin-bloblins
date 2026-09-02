@@ -90,16 +90,21 @@ type PetsStore = {
   draftName: string
   /** bumped by the sim on committed changes so the panel roster refreshes */
   simTick: number
+  /** bumped whenever a reroll deserves the preview's victory spin */
+  previewSpinTick: number
   setDraftGenome: (genome: PetGenome) => void
   setDraftName: (name: string) => void
   bumpSimTick: () => void
+  bumpPreviewSpin: () => void
 }
 
 export const usePets = create<PetsStore>((set) => ({
   draftGenome: PetGenome.parse({}),
   draftName: 'Pip',
   simTick: 0,
+  previewSpinTick: 0,
   setDraftGenome: (genome) => set({ draftGenome: genome }),
   setDraftName: (name) => set({ draftName: name }),
   bumpSimTick: () => set((s) => ({ simTick: s.simTick + 1 })),
+  bumpPreviewSpin: () => set((s) => ({ previewSpinTick: s.previewSpinTick + 1 })),
 }))

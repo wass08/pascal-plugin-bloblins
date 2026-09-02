@@ -48,6 +48,7 @@ export default function PetTool() {
       useScene.getState().createNode(egg as unknown as AnyNode, activeLevelId as AnyNodeId)
       useViewer.getState().setSelection({ selectedIds: [egg.id as AnyNodeId] })
       triggerSFX('sfx:item-place')
+      pets.bumpPreviewSpin()
       // The draft is spent: the next egg is a different creature with a
       // different name, so holding the tool down never lays a clutch of twins.
       pets.setDraftGenome(randomGenome())

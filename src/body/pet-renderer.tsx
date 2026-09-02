@@ -122,7 +122,8 @@ export default function PetRenderer({ node }: { node: PetNode }) {
   const bubble = useRef<Sprite>(null!)
   const hearts = useRef<(Sprite | null)[]>([])
   const tears = useRef<(Sprite | null)[]>([])
-  const napLift = useRef(0)
+  const napBlend = useRef(0)
+  const lastSurf = useRef<{ x: number; y: number; z: number } | null>(null)
   const anchorY = memberElevation(node as never)
   const parts = useRef(new Map<string, Object3D>())
   const handlers = useNodeEvents(node as never, node.type as never)
@@ -212,18 +213,21 @@ export default function PetRenderer({ node }: { node: PetNode }) {
     const a = anim.current
 
     if (rt) {
-      roamGroup.position.x = rt.pos[0] - node.position[0]
-      roamGroup.position.z = rt.pos[1] - node.position[2]
-    }
-
-    // Furniture naps: ease the whole roam group (pet, bubble, hearts, tears)
-    // up onto the raycast surface, with a little bump while in transit, and
-    // back down to the floor on waking.
-    {
-      const targetLift = rt?.napSurface ? Math.max(0, rt.napSurface.y - anchorY) : 0
-      const rising = targetLift - napLift.current
-      napLift.current += rising * Math.min(1, dt * 4.5)
-      roamGroup.position.y = napLift.current + Math.min(0.09, Math.abs(rising)) * 0.8
+      // Furniture naps: blend the whole roam group (pet, bubble, hearts,
+      // tears) from the pet's ground position up onto the raycast surface —
+      // and back down on waking, remembering the last surface so the descent
+      // is just as smooth. The sine-of-blend term is the little hop arc.
+      if (rt.napSurface) lastSurf.current = rt.napSurface
+      const surf = rt.napSurface ?? (napBlend.current > 0.005 ? lastSurf.current : null)
+      const blendTarget = rt.napSurface ? 1 : 0
+      napBlend.current += (blendTarget - napBlend.current) * Math.min(1, dt * 4)
+      const b = surf ? napBlend.current : 0
+      const px = rt.pos[0] * (1 - b) + (surf?.x ?? 0) * b
+      const pz = rt.pos[1] * (1 - b) + (surf?.z ?? 0) * b
+      roamGroup.position.x = px - node.position[0]
+      roamGroup.position.z = pz - node.position[2]
+      const lift = surf ? Math.max(0, surf.y - anchorY) * b : 0
+      roamGroup.position.y = lift + Math.sin(b * Math.PI) * 0.07
     }
 
     const sprite = bubble.current

@@ -79,6 +79,9 @@ export function rayRectDistance(
   const maxX = rect.cx + rect.hx + PET_RADIUS
   const minZ = rect.cz - rect.hz - PET_RADIUS
   const maxZ = rect.cz + rect.hz + PET_RADIUS
+  // Already inside (nap wake, spawned overlapping, dragged in): treat the rect
+  // as open so the pet can walk OUT instead of being boxed in forever.
+  if (fx > minX && fx < maxX && fz > minZ && fz < maxZ) return null
   let tMin = 0
   let tMax = maxDist
   for (const [from, dir, lo, hi] of [
@@ -271,6 +274,8 @@ export default function PetsSystem() {
   const behaviorAt = useRef(new Map<string, number>())
   const prevHomes = useRef(new Map<string, [number, number]>())
   const prevSelected = useRef(new Set<string>())
+  const homeMovedAt = useRef(new Map<string, number>())
+  const stuckProbe = useRef(new Map<string, { x: number; z: number; at: number }>())
 
   // One-time real-time catch-up for stats accrued while the project was
   // closed, committed in a single batch.
@@ -357,6 +362,7 @@ export default function PetsSystem() {
       if (!prevHome || Math.hypot(prevHome[0] - home[0], prevHome[1] - home[1]) > 1e-4) {
         prevHomes.current.set(pet.id, home)
         if (prevHome) {
+          homeMovedAt.current.set(pet.id, now)
           rt.pos[0] = home[0]
           rt.pos[1] = home[1]
           rt.targetId = null
@@ -369,7 +375,8 @@ export default function PetsSystem() {
       // A selected pet sits still with its node position snapped to where it
       // actually stands, so the move gizmo grabs the pet, not the stale home
       // anchor it wandered away from.
-      const selected = selectedIds.has(pet.id) || movingId === pet.id
+      const dragging = now - (homeMovedAt.current.get(pet.id) ?? 0) < 600
+      const selected = selectedIds.has(pet.id) || movingId === pet.id || dragging
       if (selected) {
         if (!prevSelected.current.has(pet.id)) {
           prevSelected.current.add(pet.id)
@@ -432,11 +439,27 @@ export default function PetsSystem() {
         // pet lies ON the sofa instead of hiding under it.
         if (!wasNapping && rt.activity === 'nap' && rt.targetId) {
           const surface = findNapSurface(rt.targetId, levelId)
-          if (surface) {
-            rt.napSurface = surface
-            rt.pos[0] = surface.x
-            rt.pos[1] = surface.z
-          }
+          if (surface) rt.napSurface = surface
+        }
+
+        // Corner escape: a pet that has been TRYING to move but has barely
+        // moved for a couple of seconds is wedged against geometry — turn it
+        // hard toward home (with spread) instead of letting it grind.
+        const moving =
+          rt.activity === 'wander' ||
+          rt.activity === 'seek-bowl' ||
+          rt.activity === 'seek-furniture' ||
+          rt.activity === 'follow'
+        const probe = stuckProbe.current.get(pet.id)
+        if (!moving) {
+          stuckProbe.current.delete(pet.id)
+        } else if (!probe || Math.hypot(rt.pos[0] - probe.x, rt.pos[1] - probe.z) > 0.12) {
+          stuckProbe.current.set(pet.id, { x: rt.pos[0], z: rt.pos[1], at: now })
+        } else if (now - probe.at > 2500) {
+          rt.heading =
+            Math.atan2(home[1] - rt.pos[1], home[0] - rt.pos[0]) + (Math.random() - 0.5) * 1.6
+          if (rt.activity === 'wander') rt.activityUntil = now + 3000 + Math.random() * 3000
+          stuckProbe.current.set(pet.id, { x: rt.pos[0], z: rt.pos[1], at: now })
         }
       }
 
@@ -536,7 +559,12 @@ function runBehavior(
     const t =
       bowls.find((b) => b.id === rt.targetId)?.pos ??
       world.furniture.find((f) => f.id === rt.targetId)?.pos
-    return t ? Math.hypot(t[0] - rt.pos[0], t[1] - rt.pos[1]) : null
+    if (!t) return null
+    const raw = Math.hypot(t[0] - rt.pos[0], t[1] - rt.pos[1])
+    // Furniture is arrived-at when the pet reaches its EDGE — walking to the
+    // exact center means walking inside the sofa first.
+    const rect = world.obstacles.find((o) => o.id === rt.targetId)
+    return rect ? Math.max(0, raw - Math.min(rect.hx, rect.hz)) : raw
   })()
   const ctx: BehaviorContext = {
     now,
