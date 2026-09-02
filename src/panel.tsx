@@ -23,11 +23,12 @@ import {
   PATTERNS,
   PetGenome,
   type PetNode,
+  type PetStats,
   type PoopNode,
   TAIL_TYPES,
   TOPPERS,
 } from './schema'
-import { hygieneOf, moodOf } from './sim/stats'
+import { hygieneOf, liveStatsOf, moodOf } from './sim/stats'
 import { type Mood, usePets } from './store'
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
@@ -305,11 +306,11 @@ function stageWord(stage: LifeStage): string {
   return stage === 'egg' ? 'Egg' : stage === 'baby' ? 'Baby' : 'Adult'
 }
 
-function needValues(pet: PetNode, hygiene: number): Record<NeedKey, number> {
+function needValues(stats: PetStats, hygiene: number): Record<NeedKey, number> {
   return {
-    energy: clamp01(pet.energy),
-    fullness: clamp01(pet.fullness),
-    happiness: clamp01(pet.happiness),
+    energy: clamp01(stats.energy),
+    fullness: clamp01(stats.fullness),
+    happiness: clamp01(stats.happiness),
     hygiene: clamp01(hygiene),
   }
 }
@@ -479,8 +480,9 @@ function PetCard({
 
   const stage = lifeStageOf(pet, now)
   const hygiene = hygieneOf(poopCount)
-  const values = needValues(pet, hygiene)
-  const mood = moodOf(pet, hygiene)
+  const stats = liveStatsOf(pet, now)
+  const values = needValues(stats, hygiene)
+  const mood = moodOf(stats, hygiene)
   const lowest = Math.min(...NEEDS.map((need) => values[need.key]))
   const tone = moodTone(mood, lowest)
   const colors = genomeColors(pet.genome)
@@ -678,8 +680,9 @@ function PetRow({
 }) {
   const stage = lifeStageOf(pet, now)
   const hygiene = hygieneOf(poopCount)
-  const values = needValues(pet, hygiene)
-  const mood = moodOf(pet, hygiene)
+  const stats = liveStatsOf(pet, now)
+  const values = needValues(stats, hygiene)
+  const mood = moodOf(stats, hygiene)
 
   return (
     <button
@@ -1216,8 +1219,8 @@ export default function PetsPanel() {
       ),
     ),
   )
-  // Committed stat writes land ~every 30 s and bump this; it is the roster's
-  // clock as much as its refresh signal.
+  // Committed stat writes bump this; the 1 Hz uiTick below is what keeps the
+  // live (decayed) readout moving between those rare commits.
   const simTick = usePets((s) => s.simTick)
   const [uiTick, setUiTick] = useState(0)
 

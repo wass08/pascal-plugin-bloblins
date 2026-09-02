@@ -29,6 +29,24 @@ export function catchUpStats(stats: PetStats, elapsedMs: number): PetStats {
   }
 }
 
+/**
+ * The stats a pet reads RIGHT NOW: its last committed values decayed forward
+ * from `lastSimAt`. Decay is a pure function of the committed stats and the
+ * time since, so the UI and the behavior machine can run live while the node
+ * itself is written back only rarely (see COMMIT_EVERY_MS in system.tsx).
+ * An egg has no stats to age yet, and a pet that has never been simulated has
+ * no clock to age from — both read exactly what is stored.
+ */
+export function liveStatsOf(
+  pet: PetStats & { hatchedAt?: number | null; lastSimAt: number },
+  now: number,
+): PetStats {
+  if (pet.hatchedAt == null || pet.lastSimAt <= 0) {
+    return { fullness: pet.fullness, happiness: pet.happiness, energy: pet.energy }
+  }
+  return catchUpStats(pet, now - pet.lastSimAt)
+}
+
 export function applyCare(stats: PetStats, care: 'pat' | 'eat' | 'scoop'): PetStats {
   const current = {
     fullness: clamp01(stats.fullness),

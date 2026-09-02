@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { PetStats } from '../schema'
-import { applyCare, catchUpStats, hygieneOf, moodOf } from './stats'
+import { applyCare, catchUpStats, hygieneOf, liveStatsOf, moodOf } from './stats'
 
 const HOUR = 60 * 60 * 1000
 const full: PetStats = { fullness: 1, happiness: 1, energy: 1 }
@@ -36,6 +36,26 @@ describe('stat simulation', () => {
     expect(hygieneOf(-2)).toBe(1)
     expect(hygieneOf(5)).toBe(0)
     expect(hygieneOf(50)).toBe(0)
+  })
+
+  test('live stats leave eggs and never-simulated pets exactly as stored', () => {
+    const stored = { fullness: 0.4, happiness: 0.6, energy: 0.8 }
+    const egg = { ...stored, hatchedAt: null, lastSimAt: 1000 }
+    const unsimulated = { ...stored, hatchedAt: 1000, lastSimAt: 0 }
+    expect(liveStatsOf(egg, 1000 + 6 * HOUR)).toEqual(stored)
+    expect(liveStatsOf(unsimulated, 6 * HOUR)).toEqual(stored)
+  })
+
+  test('live stats decay a hatched pet forward from lastSimAt', () => {
+    const pet = { ...full, hatchedAt: 1000, lastSimAt: 1000 }
+    expect(liveStatsOf(pet, 1000 + 3 * HOUR)).toEqual(catchUpStats(full, 3 * HOUR))
+    expect(liveStatsOf(pet, 1000 + 24 * HOUR)).toEqual(catchUpStats(full, 24 * HOUR))
+  })
+
+  test('live stats never age a pet backwards', () => {
+    const pet = { ...full, hatchedAt: 1000, lastSimAt: 5 * HOUR }
+    expect(liveStatsOf(pet, 5 * HOUR)).toEqual(catchUpStats(full, 0))
+    expect(liveStatsOf(pet, 5 * HOUR - 2 * HOUR)).toEqual(catchUpStats(full, 0))
   })
 
   test('mood uses the specified priority order', () => {
