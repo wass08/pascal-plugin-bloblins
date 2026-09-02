@@ -33,6 +33,10 @@ function finiteHit(distance: number | null): number {
   return distance == null ? WHISKER_LENGTH : Math.max(0, Math.min(WHISKER_LENGTH, distance))
 }
 
+// Wander turning is a slowly drifting bias per pet, not per-frame white
+// noise — at 60fps the latter reads as a constant left/right shimmer.
+const wanderState = new WeakMap<PetRuntime, { bias: number; until: number; avoidSign: number }>()
+
 export function stepSteering(
   rt: PetRuntime,
   target: [number, number] | null,
@@ -51,10 +55,20 @@ export function stepSteering(
   const outsideLeash = homeDx * homeDx + homeDz * homeDz > Math.max(0, leashRadius) ** 2
   const effectiveTarget = outsideLeash ? home : target
 
+  let wander = wanderState.get(rt)
+  if (!wander) {
+    wander = { bias: 0, until: 0, avoidSign: 1 }
+    wanderState.set(rt, wander)
+  }
+
   let desiredSpeed = WANDER_SPEED * Math.max(0, speedScale)
   if (effectiveTarget == null) {
-    const wanderHeading = rt.heading + (rng() * 2 - 1) * MAX_TURN_RATE * dt
-    rt.heading = moveToward(rt.heading, wanderHeading, MAX_TURN_RATE * dt)
+    const now = Date.now()
+    if (now > wander.until) {
+      wander.bias = (rng() * 2 - 1) * MAX_TURN_RATE * 0.6
+      wander.until = now + 700 + rng() * 1400
+    }
+    rt.heading += wander.bias * dt
   } else {
     const dx = effectiveTarget[0] - rt.pos[0]
     const dz = effectiveTarget[1] - rt.pos[1]
@@ -84,8 +98,14 @@ export function stepSteering(
     else {
       const leftClearance = finiteHit(hits[1] ?? null)
       const rightClearance = finiteHit(hits[2] ?? null)
-      turnSign = leftClearance === rightClearance ? (rng() < 0.5 ? -1 : 1) : leftClearance > rightClearance ? 1 : -1
+      turnSign =
+        leftClearance === rightClearance
+          ? wander.avoidSign
+          : leftClearance > rightClearance
+            ? 1
+            : -1
     }
+    wander.avoidSign = turnSign
     const strength = 1 - Math.min(WHISKER_LENGTH, nearestDistance) / WHISKER_LENGTH
     rt.heading += turnSign * AVOID_TURN_RATE * strength * dt
   }

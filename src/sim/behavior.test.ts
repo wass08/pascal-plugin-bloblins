@@ -24,7 +24,7 @@ function runtime(overrides: Partial<PetRuntime> = {}): PetRuntime {
 
 function context(overrides: Partial<BehaviorContext> = {}): BehaviorContext {
   return {
-    now: 1_000,
+    now: 1000,
     stats: { fullness: 0.8, happiness: 0.8, energy: 0.8 },
     stage: 'adult',
     bowls: [],
@@ -41,7 +41,10 @@ describe('behavior state machine', () => {
   test('moves from hunger to a bowl, eats, then wanders', () => {
     const bowl = { id: 'bowl-1', pos: [2, 0] as [number, number], food: 1 }
     const rt = runtime()
-    const seeking = stepBehavior(rt, context({ stats: { fullness: 0.2, happiness: 0.8, energy: 0.8 }, bowls: [bowl] }))
+    const seeking = stepBehavior(
+      rt,
+      context({ stats: { fullness: 0.2, happiness: 0.8, energy: 0.8 }, bowls: [bowl] }),
+    )
     expect(seeking.activity).toBe('seek-bowl')
     expect(seeking.targetId).toBe(bowl.id)
 
@@ -49,17 +52,17 @@ describe('behavior state machine', () => {
     const eating = stepBehavior(
       rt,
       context({
-        now: 2_000,
+        now: 2000,
         stats: { fullness: 0.2, happiness: 0.8, energy: 0.8 },
         bowls: [bowl],
         distToTarget: ARRIVE_DIST,
       }),
     )
     expect(eating.activity).toBe('eating')
-    expect(eating.activityUntil).toBe(6_000)
+    expect(eating.activityUntil).toBe(6000)
 
     Object.assign(rt, eating)
-    const done = stepBehavior(rt, context({ now: 6_001, bowls: [bowl] }))
+    const done = stepBehavior(rt, context({ now: 6001, bowls: [bowl] }))
     expect(done.activity).toBe('wander')
     expect(done.eatFromBowlId).toBe(bowl.id)
     expect(done.emote).toBe('sparkle')
@@ -75,7 +78,7 @@ describe('behavior state machine', () => {
     Object.assign(rt, seeking)
     const napping = stepBehavior(
       rt,
-      context({ now: 2_000, stats: sleepyStats, furniture: [bed], distToTarget: 0.1 }),
+      context({ now: 2000, stats: sleepyStats, furniture: [bed], distToTarget: 0.1 }),
     )
     expect(napping.activity).toBe('nap')
     expect(napping.activityUntil).toBeWithin(62_000, 122_000)
@@ -94,7 +97,7 @@ describe('behavior state machine', () => {
     expect(following.emote).toBe('music')
 
     const eating = stepBehavior(
-      runtime({ activity: 'eating', activityUntil: 5_000, targetId: 'bowl' }),
+      runtime({ activity: 'eating', activityUntil: 5000, targetId: 'bowl' }),
       context({ followTarget: [4, 5] }),
     )
     expect(eating.activity).toBe('eating')

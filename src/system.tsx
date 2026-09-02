@@ -1,6 +1,12 @@
 'use client'
 
-import { type AnyNode, type AnyNodeId, sceneRegistry, useScene } from '@pascal-app/core'
+import {
+  type AnyNode,
+  type AnyNodeId,
+  sceneRegistry,
+  useLiveNodeOverrides,
+  useScene,
+} from '@pascal-app/core'
 import { useEditor } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
 import { useFrame } from '@react-three/fiber'
@@ -10,7 +16,7 @@ import { eggWiggleTick, hatchFanfare, munch, petChirp, petSong } from './audio'
 import { voiceOf } from './genome'
 import { isReadOnlyHost } from './host'
 import { type BowlNode, EGG_HATCH_MS, lifeStageOf, type PetNode, PoopNode } from './schema'
-import { type BehaviorContext, stepBehavior } from './sim/behavior'
+import { ARRIVE_DIST, type BehaviorContext, BOWL_ARRIVE, stepBehavior } from './sim/behavior'
 import { furnitureKindOf } from './sim/furniture'
 import { catchUpStats, hygieneOf, moodOf } from './sim/stats'
 import { type ObstacleProbe, stepSteering } from './sim/steering'
@@ -321,6 +327,7 @@ export default function PetsSystem() {
     if (walkthrough) cameraWorld.copy(state.camera.position)
 
     const selectedIds = new Set(useViewer.getState().selection.selectedIds as readonly string[])
+    const liveOverrides = useLiveNodeOverrides.getState()
     // A pet mid-drag freezes exactly like a selected one — no strolling away
     // from under the move gizmo.
     const movingId =
@@ -375,7 +382,17 @@ export default function PetsSystem() {
       // A selected pet sits still with its node position snapped to where it
       // actually stands, so the move gizmo grabs the pet, not the stale home
       // anchor it wandered away from.
-      const dragging = now - (homeMovedAt.current.get(pet.id) ?? 0) < 600
+      const liveOverride = liveOverrides.get(pet.id) as
+        | { position?: [number, number, number] }
+        | undefined
+      if (liveOverride?.position) {
+        // Mid-drag: the gizmo moves the node through live overrides, not the
+        // scene store — pin the pet to the override so it rides the drag.
+        rt.pos[0] = liveOverride.position[0]
+        rt.pos[1] = liveOverride.position[2]
+      }
+      const dragging =
+        liveOverride?.position != null || now - (homeMovedAt.current.get(pet.id) ?? 0) < 600
       const selected = selectedIds.has(pet.id) || movingId === pet.id || dragging
       if (selected) {
         if (!prevSelected.current.has(pet.id)) {
@@ -425,6 +442,15 @@ export default function PetsSystem() {
         // Waking from a nap restores energy and restarts the cat-nap clock.
         if (wasNapping && rt.activity !== 'nap') {
           rt.lastNapAt = now
+          if (rt.napSurface) {
+            // Hop off AWAY from the furniture so the descent lands clear of
+            // its face instead of sinking back through the cushions.
+            const away = Math.atan2(rt.pos[1] - rt.napSurface.z, rt.pos[0] - rt.napSurface.x)
+            const dir = Number.isFinite(away) ? away : rt.heading
+            rt.pos[0] += Math.cos(dir) * 0.35
+            rt.pos[1] += Math.sin(dir) * 0.35
+            rt.heading = dir
+          }
           rt.napSurface = null
           if (!readOnly) {
             scene.updateNode(
@@ -489,7 +515,15 @@ export default function PetsSystem() {
           : null
       const stage = lifeStageOf(pet, now)
       const speedScale = rt.activity === 'follow' ? 1.8 : stage === 'baby' ? 0.6 : 1
+      let arrived = false
+      if (target && rt.targetId) {
+        const rect = world.obstacles.find((o) => o.id === rt.targetId)
+        const slack = rect ? Math.min(rect.hx, rect.hz) : 0
+        const threshold = rt.activity === 'seek-bowl' ? BOWL_ARRIVE : ARRIVE_DIST + slack
+        arrived = Math.hypot(target[0] - rt.pos[0], target[1] - rt.pos[1]) <= threshold
+      }
       const moving =
+        !arrived &&
         rt.activity !== 'idle' &&
         rt.activity !== 'nap' &&
         rt.activity !== 'eating' &&

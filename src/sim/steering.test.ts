@@ -24,7 +24,16 @@ function runtime(pos: [number, number], heading: number): PetRuntime {
 describe('steering', () => {
   test('the leash overrides wander and turns toward home', () => {
     const rt = runtime([9, 0], Math.PI / 2)
-    stepSteering(rt, null, [0, 0], 8, () => null, 1, 1, () => 0.5)
+    stepSteering(
+      rt,
+      null,
+      [0, 0],
+      8,
+      () => null,
+      1,
+      1,
+      () => 0.5,
+    )
     expect(rt.heading).toBeWithin(Math.PI / 2, Math.PI)
     expect(rt.pos[0]).toBeLessThan(9)
   })
@@ -50,8 +59,26 @@ describe('steering', () => {
   test('seeded wander input is deterministic', () => {
     const first = runtime([0, 0], 0)
     const second = runtime([0, 0], 0)
-    stepSteering(first, null, [0, 0], 8, () => null, 0.5, 1, () => 0.25)
-    stepSteering(second, null, [0, 0], 8, () => null, 0.5, 1, () => 0.25)
+    stepSteering(
+      first,
+      null,
+      [0, 0],
+      8,
+      () => null,
+      0.5,
+      1,
+      () => 0.25,
+    )
+    stepSteering(
+      second,
+      null,
+      [0, 0],
+      8,
+      () => null,
+      0.5,
+      1,
+      () => 0.25,
+    )
     expect(first).toEqual(second)
   })
 })

@@ -884,6 +884,7 @@ function PreviewCreature({
       }
     }
     const t = state.clock.getElapsedTime()
+    if (c.mode === 'spin') swayWeight.current = 0
     const swayTarget = c.mode === 'sway' ? 1 : 0
     swayWeight.current += (swayTarget - swayWeight.current) * Math.min(1, delta * 2.5)
     const w = swayWeight.current
@@ -1042,8 +1043,10 @@ function HatchTab() {
 
   // Every reroll (Surprise me, or the tool rerolling after an egg is placed)
   // bumps previewSpinTick — spin three eased turns and land facing front.
+  const seenSpinTick = useRef(spinTick)
   useEffect(() => {
-    if (spinTick === 0) return
+    if (spinTick === seenSpinTick.current) return
+    seenSpinTick.current = spinTick
     const c = control.current
     c.mode = 'spin'
     c.resumeAt = null

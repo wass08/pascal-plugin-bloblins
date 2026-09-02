@@ -220,7 +220,9 @@ export default function PetRenderer({ node }: { node: PetNode }) {
       if (rt.napSurface) lastSurf.current = rt.napSurface
       const surf = rt.napSurface ?? (napBlend.current > 0.005 ? lastSurf.current : null)
       const blendTarget = rt.napSurface ? 1 : 0
-      napBlend.current += (blendTarget - napBlend.current) * Math.min(1, dt * 4)
+      // Quick up, quicker off — waking should read as a hop, not a slide.
+      napBlend.current +=
+        (blendTarget - napBlend.current) * Math.min(1, dt * (blendTarget === 1 ? 6 : 10))
       const b = surf ? napBlend.current : 0
       const px = rt.pos[0] * (1 - b) + (surf?.x ?? 0) * b
       const pz = rt.pos[1] * (1 - b) + (surf?.z ?? 0) * b

@@ -58,12 +58,7 @@ export function moodOf(stats: PetStats, hygiene: number): Mood {
   if (stats.energy < 0.2) return 'sleepy'
   if (hygiene < 0.35) return 'grumpy'
   if (stats.happiness < 0.3) return 'lonely'
-  if (
-    stats.fullness > 0.85 &&
-    stats.happiness > 0.85 &&
-    stats.energy > 0.85 &&
-    hygiene > 0.85
-  ) {
+  if (stats.fullness > 0.85 && stats.happiness > 0.85 && stats.energy > 0.85 && hygiene > 0.85) {
     return 'ecstatic'
   }
   return 'content'

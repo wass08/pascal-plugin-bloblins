@@ -33,7 +33,9 @@ export function furnitureKindOf(node: {
 
   const haystack = values.join(' ').toLowerCase()
   if (['bed', 'mattress', 'crib'].some((term) => haystack.includes(term))) return 'bed'
-  if (['sofa', 'couch', 'armchair', 'chair', 'bench', 'stool'].some((term) => haystack.includes(term))) {
+  if (
+    ['sofa', 'couch', 'armchair', 'chair', 'bench', 'stool'].some((term) => haystack.includes(term))
+  ) {
     return 'seat'
   }
   if (['fireplace', 'hearth', 'stove'].some((term) => haystack.includes(term))) return 'hearth'
