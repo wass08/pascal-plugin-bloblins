@@ -35,7 +35,7 @@ modules; module owners implement against it without needing the rest of the tree
 position is `PetRuntime.pos` in `store.ts` — a plain module-level Map mutated in
 place by the sim and read by renderers inside `useFrame`. Nothing writes node
 position per frame; nothing calls React setState per frame. Committed writes go
-through `useScene.getState().updateNodes` on a coarse throttle (~30 s) from the
+through `useScene.getState().updateNodes` on a coarse throttle (~10 min) from the
 system tick only: stats + `lastSimAt` + `hatchedAt`, plus occasional
 `createNode` (poop) — never transforms.
 
@@ -177,8 +177,10 @@ the canvas). Default export component:
   per pet); every ~1 s run `stepBehavior`; hatch eggs whose time has come
   (`updateNode { hatchedAt: now }` + fanfare); spawn poop (`createNode`) when
   `wantsPoop`; decrement bowls on eating (single `updateNode` per meal).
-- Every ~30 s (and on `beforeunload`): commit stats + `lastSimAt` via one
-  `updateNodes`; `usePets.bumpSimTick()`.
+- Every ~10 min (and on `beforeunload`): commit stats + `lastSimAt` via one
+  `updateNodes`; `usePets.bumpSimTick()`. Between commits the UI and the sim
+  read `liveStatsOf(pet, now)` — every commit is a scene write the host
+  autosaves, so the cadence has to stay coarse.
 - Walkthrough follow: read the walkthrough/player position if available (see
   `@pascal-app/viewer` walkthrough store; boots reads player pos similarly) →
   `BehaviorContext.followTarget` for pets within ~3 m when the player crouches

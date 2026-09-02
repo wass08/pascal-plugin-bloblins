@@ -18,13 +18,22 @@ import { isReadOnlyHost } from './host'
 import { type BowlNode, EGG_HATCH_MS, lifeStageOf, type PetNode, PoopNode } from './schema'
 import { ARRIVE_DIST, type BehaviorContext, BOWL_ARRIVE, stepBehavior } from './sim/behavior'
 import { furnitureKindOf } from './sim/furniture'
-import { catchUpStats, hygieneOf, moodOf } from './sim/stats'
+import { catchUpStats, hygieneOf, liveStatsOf, moodOf } from './sim/stats'
 import { type ObstacleProbe, stepSteering } from './sim/steering'
 import { ensureRuntime, heldPets, type PetRuntime, petRuntimes, usePets } from './store'
 
 const LEASH_RADIUS = 8
 const PET_RADIUS = 0.22
-const COMMIT_EVERY_MS = 30_000
+/**
+ * How often committed stats are written back to the scene. Stats read live
+ * off `lastSimAt` (`liveStatsOf`), so a commit is purely about persistence —
+ * and every commit is a scene mutation the host autosaves, so the old 30 s
+ * cadence saved the whole project, churned the undo stack and flooded the
+ * project event log for as long as a tab stayed open.
+ */
+const COMMIT_EVERY_MS = 10 * 60_000
+/** On load, only absences longer than this are worth a catch-up commit. */
+const CATCH_UP_MIN_MS = 30_000
 const BEHAVIOR_EVERY_MS = 1000
 const WORLD_REBUILD_MS = 2000
 const FOLLOW_RANGE = 6
@@ -287,8 +296,10 @@ function scenePosOf(
 /**
  * The Pets simulation loop — mounted once per scene while the plugin is
  * installed (def.system). Per frame: steering. ~1 Hz per pet: behavior.
- * Every 30 s: one batched stat commit. Scene writes are skipped entirely on
- * read-only hosts; the transient sim still runs so published pets live.
+ * Every 10 min: one batched stat commit — stats read live off `lastSimAt` in
+ * between, so the host is not autosaving the whole project on the sim's clock.
+ * Scene writes are skipped entirely on read-only hosts; the transient sim
+ * still runs so published pets live.
  */
 export default function PetsSystem() {
   const hatching = useRef(new Set<string>())
@@ -313,7 +324,7 @@ export default function PetsSystem() {
       const pet = node as unknown as PetNode
       if (pet.hatchedAt == null || pet.lastSimAt === 0) continue
       const elapsed = now - pet.lastSimAt
-      if (elapsed < COMMIT_EVERY_MS) continue
+      if (elapsed < CATCH_UP_MIN_MS) continue
       updates.push({
         id: pet.id as AnyNodeId,
         data: { ...catchUpStats(pet, elapsed), lastSimAt: now },
@@ -339,7 +350,10 @@ export default function PetsSystem() {
           if ((node as { type?: string }).type !== 'pets:pet') continue
           const pet = node as unknown as PetNode
           if (pet.hatchedAt == null) continue
-          forcedUpdates.push({ id: pet.id as AnyNodeId, data: patch })
+          forcedUpdates.push({
+            id: pet.id as AnyNodeId,
+            data: { ...liveStatsOf(pet, now), ...patch, lastSimAt: now },
+          })
         }
         if (forcedUpdates.length > 0) scene.updateNodes(forcedUpdates as never)
       }
@@ -575,10 +589,15 @@ export default function PetsSystem() {
           }
           rt.napSurface = null
           if (!readOnly) {
+            // The node's stats are stale between commits, so the wake-up bonus
+            // lands on the live ones and stamps the commit clock with them.
+            const live = liveStatsOf(pet, now)
             scene.updateNode(
               pet.id as AnyNodeId,
               {
-                energy: Math.min(1, pet.energy + 0.25),
+                ...live,
+                energy: Math.min(1, live.energy + 0.25),
+                lastSimAt: now,
               } as never,
             )
           }
@@ -698,6 +717,7 @@ function runBehavior(
   readOnly: boolean,
 ): void {
   const stage = lifeStageOf(pet, now)
+  const stats = liveStatsOf(pet, now)
   // A Feed plate spawned seconds ago may predate the cached world snapshot —
   // splice the live node in so behavior can seek and arrive immediately.
   let bowls = world.bowls
@@ -724,13 +744,13 @@ function runBehavior(
   })()
   const ctx: BehaviorContext = {
     now,
-    stats: pet,
+    stats,
     stage,
     bowls,
     furniture: world.furniture,
     followTarget:
       followTarget &&
-      pet.happiness > 0.5 &&
+      stats.happiness > 0.5 &&
       Math.hypot(followTarget[0] - rt.pos[0], followTarget[1] - rt.pos[1]) < FOLLOW_RANGE
         ? followTarget
         : null,
@@ -758,8 +778,10 @@ function runBehavior(
       scene.updateNode(
         pet.id as AnyNodeId,
         {
-          fullness: Math.min(1, pet.fullness + bite * 1.5),
-          happiness: Math.min(1, pet.happiness + 0.05),
+          ...stats,
+          fullness: Math.min(1, stats.fullness + bite * 1.5),
+          happiness: Math.min(1, stats.happiness + 0.05),
+          lastSimAt: now,
         } as never,
       )
       munch()
@@ -779,7 +801,7 @@ function runBehavior(
 
   // Voice cadence: chirps every 7–16 s, and every 60–150 s an idle pet
   // performs its signature song (with the dance to match).
-  const mood = moodOf(pet, hygieneOf(world.poopCount))
+  const mood = moodOf(stats, hygieneOf(world.poopCount))
   const singing = now < rt.singingUntil
   if (
     !singing &&

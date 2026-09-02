@@ -18,7 +18,7 @@ import { genomeColors, PET_CREAM, PET_LEAF, voiceOf } from '../genome'
 import { patPet } from '../interaction'
 import { memberElevation } from '../pet/elevation'
 import { EGG_HATCH_MS, growthOf, type PetNode, type PoopNode } from '../schema'
-import { hygieneOf, moodOf } from '../sim/stats'
+import { hygieneOf, liveStatsOf, moodOf } from '../sim/stats'
 import { heldPets, type Mood, petRuntimes } from '../store'
 import type { BodyPart } from './body-spec'
 import { buildBodySpec } from './build-body'
@@ -261,9 +261,10 @@ export default function PetRenderer({ node }: { node: PetNode }) {
       a.moodAt = now + Math.random() * 250
       const x = rt?.pos[0] ?? node.position[0]
       const z = rt?.pos[1] ?? node.position[2]
-      a.mood = moodOf(node, hygieneOf(poopsNear(now, x, z)))
+      const live = liveStatsOf(node, now)
+      a.mood = moodOf(live, hygieneOf(poopsNear(now, x, z)))
       // A pet nobody has played with cries about it, now and then.
-      const sad = a.mood === 'lonely' || node.happiness < 0.3
+      const sad = a.mood === 'lonely' || live.happiness < 0.3
       if (sad && !napping && now > a.nextCryAt) {
         a.cryAt = now
         a.nextCryAt = now + CRY_GAP_MIN_MS + Math.random() * CRY_GAP_SPREAD_MS

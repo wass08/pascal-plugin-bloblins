@@ -4,7 +4,7 @@ import { petPurr, scoopPop } from './audio'
 import { voiceOf } from './genome'
 import { isReadOnlyHost } from './host'
 import { BowlNode, type PetNode, type PoopNode } from './schema'
-import { applyCare } from './sim/stats'
+import { applyCare, liveStatsOf } from './sim/stats'
 import { petRuntimes } from './store'
 
 /** Newer hosts export runAsSingleSceneHistoryStep (collapses every scene
@@ -31,16 +31,21 @@ export function distanceXZ(a: readonly number[], b: readonly number[]): number {
 export function patPet(id: string): void {
   const node = useScene.getState().nodes[id as AnyNodeId] as unknown as PetNode | undefined
   if (!node || node.type !== 'pets:pet') return
+  const now = Date.now()
   const rt = petRuntimes.get(id)
   if (rt) {
-    rt.lastPatAt = Date.now()
+    rt.lastPatAt = now
     rt.emote = 'hearts'
-    rt.emoteUntil = Date.now() + 2500
+    rt.emoteUntil = now + 2500
   }
   petPurr(voiceOf(node.genome))
   if (isReadOnlyHost() || node.hatchedAt == null) return
-  const { fullness, happiness, energy } = applyCare(node, 'pat')
-  useScene.getState().updateNode(id as AnyNodeId, { fullness, happiness, energy } as never)
+  // Care lands on the pet's LIVE stats — the node only holds the last commit —
+  // and stamps the clock so the written values mean "as of now".
+  const { fullness, happiness, energy } = applyCare(liveStatsOf(node, now), 'pat')
+  useScene
+    .getState()
+    .updateNode(id as AnyNodeId, { fullness, happiness, energy, lastSimAt: now } as never)
 }
 
 /**
