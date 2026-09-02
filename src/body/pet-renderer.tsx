@@ -122,6 +122,8 @@ export default function PetRenderer({ node }: { node: PetNode }) {
   const bubble = useRef<Sprite>(null!)
   const hearts = useRef<(Sprite | null)[]>([])
   const tears = useRef<(Sprite | null)[]>([])
+  const napLift = useRef(0)
+  const anchorY = memberElevation(node as never)
   const parts = useRef(new Map<string, Object3D>())
   const handlers = useNodeEvents(node as never, node.type as never)
   useRegistry(node.id, node.type, ref)
@@ -212,6 +214,16 @@ export default function PetRenderer({ node }: { node: PetNode }) {
     if (rt) {
       roamGroup.position.x = rt.pos[0] - node.position[0]
       roamGroup.position.z = rt.pos[1] - node.position[2]
+    }
+
+    // Furniture naps: ease the whole roam group (pet, bubble, hearts, tears)
+    // up onto the raycast surface, with a little bump while in transit, and
+    // back down to the floor on waking.
+    {
+      const targetLift = rt?.napSurface ? Math.max(0, rt.napSurface.y - anchorY) : 0
+      const rising = targetLift - napLift.current
+      napLift.current += rising * Math.min(1, dt * 4.5)
+      roamGroup.position.y = napLift.current + Math.min(0.09, Math.abs(rising)) * 0.8
     }
 
     const sprite = bubble.current
@@ -400,11 +412,7 @@ export default function PetRenderer({ node }: { node: PetNode }) {
   })
 
   return (
-    <group
-      position={[node.position[0], memberElevation(node as never), node.position[2]]}
-      ref={ref}
-      {...handlers}
-    >
+    <group position={[node.position[0], anchorY, node.position[2]]} ref={ref} {...handlers}>
       <group ref={roam}>
         <group
           onClick={(event) => {

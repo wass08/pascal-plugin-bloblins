@@ -5,7 +5,7 @@ import { useEditor } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
-import { Box3, Vector3 } from 'three'
+import { Box3, Raycaster, Vector3 } from 'three'
 import { eggWiggleTick, hatchFanfare, munch, petChirp, petSong } from './audio'
 import { voiceOf } from './genome'
 import { isReadOnlyHost } from './host'
@@ -201,6 +201,49 @@ export function buildWorlds(
 
 const cameraWorld = new Vector3()
 
+// One-shot nap raycast scratch objects — never allocated per nap.
+const napRaycaster = new Raycaster()
+const napRayOrigin = new Vector3()
+const napRayDown = new Vector3(0, -1, 0)
+const napBox = new Box3()
+
+/**
+ * Where on TOP of a furniture piece a pet should curl up: cast straight down
+ * from above the item's bbox at its center (and a few nearby offsets when the
+ * center misses — armrests, gaps), returning the first sensible hit in the
+ * level's local frame. Called exactly once, when a furniture nap starts.
+ */
+function findNapSurface(
+  furnitureId: string,
+  levelId: string,
+): { x: number; y: number; z: number } | null {
+  const object = sceneRegistry.nodes.get(furnitureId)
+  const level = sceneRegistry.nodes.get(levelId)
+  if (!(object && level)) return null
+  napBox.setFromObject(object)
+  if (napBox.isEmpty()) return null
+  const cx = (napBox.min.x + napBox.max.x) / 2
+  const cz = (napBox.min.z + napBox.max.z) / 2
+  napRaycaster.far = napBox.max.y - napBox.min.y + 1
+  for (const [ox, oz] of [
+    [0, 0],
+    [0.18, 0],
+    [-0.18, 0],
+    [0, 0.18],
+    [0, -0.18],
+  ] as const) {
+    napRayOrigin.set(cx + ox, napBox.max.y + 0.5, cz + oz)
+    napRaycaster.set(napRayOrigin, napRayDown)
+    const hit = napRaycaster.intersectObject(object, true)[0]
+    if (!hit) continue
+    const local = level.worldToLocal(hit.point.clone())
+    // Skip silly perches: the top of a wardrobe, or a hit at floor level.
+    if (local.y < 0.05 || local.y > 1.1) continue
+    return { x: local.x, y: local.y, z: local.z }
+  }
+  return null
+}
+
 /** Eaten-empty Feed plates scheduled for removal (plate id → epoch ms). */
 const plateCleanupAt = new Map<string, number>()
 
@@ -375,6 +418,7 @@ export default function PetsSystem() {
         // Waking from a nap restores energy and restarts the cat-nap clock.
         if (wasNapping && rt.activity !== 'nap') {
           rt.lastNapAt = now
+          rt.napSurface = null
           if (!readOnly) {
             scene.updateNode(
               pet.id as AnyNodeId,
@@ -382,6 +426,16 @@ export default function PetsSystem() {
                 energy: Math.min(1, pet.energy + 0.25),
               } as never,
             )
+          }
+        }
+        // Settling onto furniture: one raycast finds the top surface so the
+        // pet lies ON the sofa instead of hiding under it.
+        if (!wasNapping && rt.activity === 'nap' && rt.targetId) {
+          const surface = findNapSurface(rt.targetId, levelId)
+          if (surface) {
+            rt.napSurface = surface
+            rt.pos[0] = surface.x
+            rt.pos[1] = surface.z
           }
         }
       }

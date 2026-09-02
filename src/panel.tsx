@@ -1,8 +1,7 @@
 'use client'
 
-import * as pascalCore from '@pascal-app/core'
-import { type AnyNode, type AnyNodeId, useScene } from '@pascal-app/core'
-import { SegmentedControl, SliderControl, triggerSFX, useEditor } from '@pascal-app/editor'
+import { type AnyNodeId, useScene } from '@pascal-app/core'
+import { SegmentedControl, SliderControl, useEditor } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { type ReactElement, useEffect, useMemo, useRef, useState } from 'react'
@@ -11,15 +10,15 @@ import { useShallow } from 'zustand/shallow'
 import type { BodyPart, BodyPartColor } from './body/body-spec'
 import { buildBodySpec } from './body/build-body'
 import { genomeColors, PET_CREAM, PET_LEAF, randomGenome } from './genome'
-import { feedPet, patPet } from './interaction'
+import { distanceXZ, feedPet, HYGIENE_RADIUS_M, patPet, restPet, washPet } from './interaction'
 import { randomPetName } from './names'
 import {
   BODY_SHAPES,
-  BowlNode,
   EAR_TYPES,
   EGG_HATCH_MS,
   EYE_STYLES,
   growthOf,
+  type LifeStage,
   lifeStageOf,
   PATTERNS,
   PetGenome,
@@ -31,28 +30,7 @@ import {
 import { hygieneOf, moodOf } from './sim/stats'
 import { type Mood, usePets } from './store'
 
-/** Newer hosts export runAsSingleSceneHistoryStep (collapses every scene
- * mutation inside `run` into ONE undo step). Resolved defensively so an older
- * host just keeps today's multi-step behavior — same trick as boots' panel. */
-const runAsOneHistoryStep = <T,>(run: () => T): T => {
-  const step = (pascalCore as { runAsSingleSceneHistoryStep?: (store: unknown, run: () => T) => T })
-    .runAsSingleSceneHistoryStep
-  return step ? step(useScene, run) : run()
-}
-
-/** Poop this far (m) from a pet's anchor is what soils ITS hygiene — droppings
- * across the house are somebody else's problem. */
-const HYGIENE_RADIUS_M = 6
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
-
-const MOOD_EMOJI: Record<Mood, string> = {
-  ecstatic: '🤩',
-  content: '😊',
-  hungry: '🍽️',
-  sleepy: '😴',
-  lonely: '🥺',
-  grumpy: '😾',
-}
 
 const sentence = (word: string) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`
 
@@ -62,148 +40,683 @@ type PetsSceneNode = { id: string; type: string; parentId: string | null }
 
 // ── Roster ──────────────────────────────────────────────────────────────────
 
-function StatBar({ label, tone, value }: { label: string; tone: string; value: number }) {
-  const pct = Math.round(clamp01(value) * 100)
-  return (
-    <div className="flex items-center gap-1.5" title={`${label} ${pct}%`}>
-      <span className="w-14 shrink-0 text-[10px] text-sidebar-foreground/50">{label}</span>
-      <div className="h-1 flex-1 overflow-hidden rounded-full bg-sidebar-accent">
-        <div className={`h-full rounded-full ${tone}`} style={{ width: `${pct}%` }} />
-      </div>
-    </div>
-  )
+/** Rounded display face for names and card titles. System stacks only — a
+ * plugin panel has no business pulling a webfont into its host. */
+const DISPLAY_FONT =
+  "ui-rounded, 'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Quicksand, system-ui, sans-serif"
+
+/** One hue per need, the roster's long-standing amber/emerald/sky/violet. */
+const AMBER = '#f59e0b'
+const EMERALD = '#10b981'
+const SKY = '#0ea5e9'
+const VIOLET = '#8b5cf6'
+const DANGER = '#ef4444'
+/** "Fine, but under the notch" — readable on both sidebar themes. */
+const NEUTRAL = 'rgba(148, 163, 184, 0.6)'
+const BLUSH = 'rgba(239, 68, 68, 0.28)'
+
+/** Below this a need is Low: red, pulsing, chipped. */
+const LOW = 0.25
+/** The notch every track carries — the level a pet is comfortable above. */
+const NOTCH = 0.6
+/** Client-side rest between two uses of the same care action. */
+const COOLDOWN_MS = 4000
+/** 2πr for the growth ring's r=38 circle. */
+const RING_LENGTH = 238.76
+
+type NeedKey = 'fullness' | 'happiness' | 'energy' | 'hygiene'
+
+type NeedDef = {
+  key: NeedKey
+  label: string
+  /** Verb on the care tile. */
+  action: string
+  color: string
+  hint: string
 }
 
-function RowButton({
-  children,
-  disabled,
-  onClick,
-  title,
-}: {
-  children: React.ReactNode
-  disabled?: boolean
-  onClick: () => void
-  title?: string
-}) {
+const NEEDS: readonly NeedDef[] = [
+  {
+    action: 'Feed',
+    color: AMBER,
+    hint: 'Sets a plate of food down in front of this pet',
+    key: 'fullness',
+    label: 'Fullness',
+  },
+  {
+    action: 'Pat',
+    color: EMERALD,
+    hint: 'A pat on the head, and a purr back',
+    key: 'happiness',
+    label: 'Happiness',
+  },
+  {
+    action: 'Rest',
+    color: SKY,
+    hint: 'Curls up for a nap right where it stands',
+    key: 'energy',
+    label: 'Energy',
+  },
+  {
+    action: 'Wash',
+    color: VIOLET,
+    hint: 'Scoops every dropping around this pet',
+    key: 'hygiene',
+    label: 'Hygiene',
+  },
+]
+
+const NEED_ICON: Record<NeedKey, ReactElement> = {
+  energy: <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z" />,
+  fullness: (
+    <>
+      <path d="M4 12h16" />
+      <path d="M5 12a7 7 0 0 0 14 0" />
+    </>
+  ),
+  happiness: (
+    <path d="M12 20s-7.2-4.6-9.2-9A5.2 5.2 0 0 1 12 7.6 5.2 5.2 0 0 1 21.2 11c-2 4.4-9.2 9-9.2 9z" />
+  ),
+  hygiene: <path d="M12 3s6 7.2 6 11.2a6 6 0 0 1-12 0C6 10.2 12 3 12 3z" />,
+}
+
+/** The roster's three micro-animations, scoped to `pets-` names and inlined so
+ * the plugin carries its own motion wherever it is mounted. */
+const ROSTER_CSS = `
+@keyframes pets-flash {
+  from { box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.4); }
+  to { box-shadow: 0 0 0 3px rgba(16, 185, 129, 0); }
+}
+@keyframes pets-rise { to { transform: translateY(-14px); opacity: 0; } }
+@keyframes pets-cooldown { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+.pets-flash { animation: pets-flash 800ms ease; }
+.pets-rise { animation: pets-rise 900ms ease forwards; }
+.pets-cooldown { animation: pets-cooldown linear forwards; }
+@media (prefers-reduced-motion: reduce) {
+  .pets-flash, .pets-rise, .pets-cooldown { animation: none; }
+}
+`
+
+let gainSeq = 0
+
+function NeedGlyph({ need, size = 15 }: { need: NeedKey; size?: number }) {
   return (
-    <button
-      className="rounded-full border border-sidebar-border/60 px-2.5 py-1 text-[11px] text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-      disabled={disabled}
-      onClick={onClick}
-      title={title}
-      type="button"
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.8}
+      viewBox="0 0 24 24"
+      width={size}
     >
-      {children}
-    </button>
+      {NEED_ICON[need]}
+    </svg>
   )
 }
 
-function PetRow({
-  now,
-  pet,
-  poops,
-  renaming,
-  setRenaming,
-}: {
-  now: number
-  pet: PetNode
-  poops: PoopNode[]
-  renaming: boolean
-  setRenaming: (id: string | null) => void
-}) {
-  const stage = lifeStageOf(pet, now)
-  const nearbyPoop = poops.filter(
-    (p) => distanceXZ(p.position, pet.position) <= HYGIENE_RADIUS_M,
-  ).length
-  const hygiene = hygieneOf(nearbyPoop)
-  const mood = moodOf(pet, hygiene)
-
-  const commitName = (next: string) => {
-    setRenaming(null)
-    const name = next.trim()
-    if (!name || name === pet.name) return
-    useScene.getState().updateNode(pet.id as AnyNodeId, { name } as never)
-  }
-
+function CrosshairGlyph() {
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-sidebar-border/60 p-2.5">
-      <div className="flex items-baseline gap-2">
-        <span aria-hidden="true" className="text-sm leading-none">
-          {stage === 'egg' ? '🥚' : MOOD_EMOJI[mood]}
-        </span>
-        {renaming ? (
-          <input
-            autoFocus
-            className="min-w-0 flex-1 rounded border border-sidebar-border/60 bg-sidebar-accent/40 px-1.5 py-0.5 text-xs outline-none"
-            defaultValue={pet.name}
-            onBlur={(e) => commitName(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') commitName(e.currentTarget.value)
-              if (e.key === 'Escape') setRenaming(null)
-            }}
-          />
-        ) : (
-          <button
-            className="min-w-0 flex-1 truncate text-left font-medium text-sm hover:underline"
-            onClick={() => setRenaming(pet.id)}
-            title="Rename"
-            type="button"
-          >
-            {pet.name}
-          </button>
-        )}
-        <span className="shrink-0 text-[10px] text-sidebar-foreground/40">
-          {stage === 'egg'
-            ? hatchCountdown(pet, now)
-            : stage === 'baby'
-              ? `Baby · ${Math.round(growthOf(pet, now) * 100)}% grown`
-              : 'Adult'}
-        </span>
-      </div>
-
-      {stage === 'egg' ? (
-        <p className="text-[11px] text-sidebar-foreground/50 leading-relaxed">
-          Still an egg — it wiggles, then hatches on its own.
-        </p>
-      ) : (
-        <div className="flex flex-col gap-1">
-          <StatBar label="Fullness" tone="bg-amber-500/60" value={pet.fullness} />
-          <StatBar label="Happiness" tone="bg-emerald-500/60" value={pet.happiness} />
-          <StatBar label="Energy" tone="bg-sky-500/60" value={pet.energy} />
-          <StatBar label="Hygiene" tone="bg-violet-500/60" value={hygiene} />
-        </div>
-      )}
-
-      <div className="flex flex-wrap gap-1.5">
-        <RowButton disabled={stage === 'egg'} onClick={() => patPet(pet.id)}>
-          Pat
-        </RowButton>
-        <RowButton
-          disabled={stage === 'egg'}
-          onClick={() => feedPet(pet.id)}
-          title="Sets a plate of food down in front of this pet"
-        >
-          Feed
-        </RowButton>
-        <RowButton
-          onClick={() => useViewer.getState().setSelection({ selectedIds: [pet.id as AnyNodeId] })}
-        >
-          Select
-        </RowButton>
-      </div>
-    </div>
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={15}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeWidth={1.7}
+      viewBox="0 0 24 24"
+      width={15}
+    >
+      <circle cx="12" cy="12" r="7" />
+      <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
+    </svg>
   )
 }
 
-function distanceXZ(a: readonly number[], b: readonly number[]): number {
-  const dx = (a[0] ?? 0) - (b[0] ?? 0)
-  const dz = (a[2] ?? 0) - (b[2] ?? 0)
-  return Math.hypot(dx, dz)
+/** Squish of the body ellipse per silhouette gene — the same four shapes the
+ * 3D body builder reads, flattened to one blob. */
+const BLOB_SHAPES: Record<PetGenome['bodyShape'], { cy: number; rx: number; ry: number }> = {
+  droplet: { cy: 51, rx: 23, ry: 25 },
+  egg: { cy: 50, rx: 22, ry: 27 },
+  pear: { cy: 52, rx: 27, ry: 21 },
+  round: { cy: 48, rx: 25, ry: 24 },
+}
+
+/**
+ * A pet, drawn flat: one tinted blob with a face. Deliberately SVG and not a
+ * `<Canvas>` — a roster of live 3D previews would cost one WebGL context per
+ * row, and this panel has to stay cheap.
+ */
+function PetAvatar({ genome, size }: { genome: PetGenome; size: number }) {
+  const colors = genomeColors(genome)
+  const { cy, rx, ry } = BLOB_SHAPES[genome.bodyShape]
+  const eyeY = cy - 2
+  const eyeDx = 5 + genome.eyeSpacing * 4
+  const eyeR = 1.7 + genome.eyeSize * 1.3
+  const sprout = genome.topper === 'leaf' || genome.topper === 'sprout'
+  return (
+    <svg aria-hidden="true" height={size} viewBox="0 0 80 80" width={size}>
+      {sprout && (
+        <g transform={`translate(0 ${cy - ry - 26})`}>
+          <path
+            d="M40 28v-7"
+            fill="none"
+            stroke={PET_LEAF}
+            strokeLinecap="round"
+            strokeWidth={2.4}
+          />
+          <path d="M40 21c-6.5-.5-9-4.5-9-9 5.5 0 9 3.5 9 9z" fill={PET_LEAF} />
+        </g>
+      )}
+      <ellipse cx={40} cy={cy} fill={colors.body} rx={rx} ry={ry} />
+      <ellipse
+        cx={40 - rx * 0.36}
+        cy={cy - ry * 0.42}
+        fill={colors.accent}
+        opacity={0.7}
+        rx={rx * 0.32}
+        ry={ry * 0.21}
+      />
+      {genome.eyeStyle === 'sleepy' ? (
+        <>
+          <path
+            d={`M${40 - eyeDx - 3} ${eyeY} q3 2.6 6 0`}
+            fill="none"
+            stroke={colors.eye}
+            strokeLinecap="round"
+            strokeWidth={2}
+          />
+          <path
+            d={`M${40 + eyeDx - 3} ${eyeY} q3 2.6 6 0`}
+            fill="none"
+            stroke={colors.eye}
+            strokeLinecap="round"
+            strokeWidth={2}
+          />
+        </>
+      ) : (
+        <>
+          <circle cx={40 - eyeDx} cy={eyeY} fill={colors.eye} r={eyeR} />
+          <circle cx={40 + eyeDx} cy={eyeY} fill={colors.eye} r={eyeR} />
+          {genome.eyeStyle === 'sparkle' && (
+            <>
+              <circle
+                cx={40 - eyeDx + eyeR * 0.4}
+                cy={eyeY - eyeR * 0.4}
+                fill="#fbfaf7"
+                r={eyeR * 0.38}
+              />
+              <circle
+                cx={40 + eyeDx + eyeR * 0.4}
+                cy={eyeY - eyeR * 0.4}
+                fill="#fbfaf7"
+                r={eyeR * 0.38}
+              />
+            </>
+          )}
+        </>
+      )}
+      <path
+        d={`M36 ${eyeY + 6} q4 3.4 8 0`}
+        fill="none"
+        stroke={colors.eye}
+        strokeLinecap="round"
+        strokeWidth={2}
+      />
+      <circle cx={40 - eyeDx - 5} cy={eyeY + 5} fill={BLUSH} r={2.6} />
+      <circle cx={40 + eyeDx + 5} cy={eyeY + 5} fill={BLUSH} r={2.6} />
+    </svg>
+  )
+}
+
+/** The same blob, still in its shell — speckled with the genome's own accent so
+ * two eggs on the floor are already telling you apart. */
+function EggAvatar({ genome, size }: { genome: PetGenome; size: number }) {
+  const colors = genomeColors(genome)
+  return (
+    <svg aria-hidden="true" height={size} viewBox="0 0 80 80" width={size}>
+      <ellipse cx={40} cy={70} fill="currentColor" opacity={0.1} rx={18} ry={4} />
+      <path
+        d="M40 10c-11.6 0-20.8 15-20.8 30.8a20.8 20.8 0 0 0 41.6 0C60.8 25 51.6 10 40 10z"
+        fill={colors.body}
+      />
+      <circle cx={33} cy={34} fill={colors.accent} opacity={0.8} r={2.4} />
+      <circle cx={47} cy={44} fill={colors.accent} opacity={0.8} r={2.9} />
+      <circle cx={36} cy={53} fill={colors.accent} opacity={0.8} r={2} />
+    </svg>
+  )
+}
+
+/** How much of this pet's life it has lived, as the ring reads it: eggs count
+ * down to hatching, everyone else grows toward adult. */
+function ringProgress(pet: PetNode, now: number): number {
+  if (pet.hatchedAt == null) return clamp01((now - pet.bornAt) / EGG_HATCH_MS)
+  return growthOf(pet, now)
 }
 
 function hatchCountdown(pet: PetNode, now: number): string {
   const left = Math.max(0, pet.bornAt + EGG_HATCH_MS - now)
   return left > 0 ? `Hatches in ${Math.ceil(left / 1000)}s` : 'Hatching…'
+}
+
+function stageWord(stage: LifeStage): string {
+  return stage === 'egg' ? 'Egg' : stage === 'baby' ? 'Baby' : 'Adult'
+}
+
+function needValues(pet: PetNode, hygiene: number): Record<NeedKey, number> {
+  return {
+    energy: clamp01(pet.energy),
+    fullness: clamp01(pet.fullness),
+    happiness: clamp01(pet.happiness),
+    hygiene: clamp01(hygiene),
+  }
+}
+
+/** Bad moods are red, a comfortable pet is emerald, and everything between the
+ * two is deliberately colorless. */
+function moodTone(mood: Mood, lowest: number): 'good' | 'mid' | 'bad' {
+  if (mood === 'hungry' || mood === 'sleepy' || mood === 'lonely' || mood === 'grumpy') return 'bad'
+  return lowest < NOTCH ? 'mid' : 'good'
+}
+
+function statusColor(value: number, color: string): string {
+  if (value < LOW) return DANGER
+  return value < NOTCH ? NEUTRAL : color
+}
+
+function nearbyPoopCount(pet: PetNode, poops: PoopNode[]): number {
+  return poops.filter((poop) => distanceXZ(poop.position, pet.position) <= HYGIENE_RADIUS_M).length
+}
+
+function GrowthRing({
+  children,
+  progress,
+  stage,
+  tint,
+}: {
+  children: React.ReactNode
+  progress: number
+  stage: LifeStage
+  tint: string
+}) {
+  return (
+    <div className="relative h-[84px] w-[84px] shrink-0">
+      <svg
+        aria-hidden="true"
+        className="absolute inset-0 h-full w-full -rotate-90"
+        viewBox="0 0 84 84"
+      >
+        <circle
+          className="text-sidebar-foreground/10"
+          cx={42}
+          cy={42}
+          fill="none"
+          r={38}
+          stroke="currentColor"
+          strokeWidth={4}
+        />
+        <circle
+          className="transition-[stroke-dashoffset] duration-700"
+          cx={42}
+          cy={42}
+          fill="none"
+          r={38}
+          stroke={tint}
+          strokeDasharray={RING_LENGTH}
+          strokeDashoffset={RING_LENGTH * (1 - clamp01(progress))}
+          strokeLinecap="round"
+          strokeWidth={4}
+        />
+      </svg>
+      <div className="absolute inset-2.5 grid place-items-center">{children}</div>
+      <span className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-sidebar-border/60 bg-sidebar px-2 py-px font-mono text-[9px] text-sidebar-foreground/70 uppercase tracking-wider">
+        {stageWord(stage)}
+      </span>
+    </div>
+  )
+}
+
+function NeedRow({
+  gains,
+  need,
+  value,
+}: {
+  gains: { id: number; text: string }[]
+  need: NeedDef
+  value: number
+}) {
+  const pct = Math.round(value * 100)
+  const low = value < LOW
+  return (
+    <div className="relative mt-3">
+      <div className="relative flex items-center gap-2">
+        <span className="shrink-0" style={{ color: need.color }}>
+          <NeedGlyph need={need.key} />
+        </span>
+        <span className="text-[13px]">{need.label}</span>
+        {low && (
+          <span
+            className="rounded-full border px-1.5 py-px font-mono text-[9px] uppercase tracking-wide"
+            style={{ borderColor: 'rgba(239, 68, 68, 0.45)', color: DANGER }}
+          >
+            Low
+          </span>
+        )}
+        <span className="ml-auto font-mono text-[11px] text-sidebar-foreground/55 tabular-nums">
+          {pct}%
+        </span>
+        {gains.map((gain) => (
+          <span
+            className="pets-rise pointer-events-none absolute -top-1 right-0 font-mono text-[11px]"
+            key={gain.id}
+            style={{ color: need.color }}
+          >
+            {gain.text}
+          </span>
+        ))}
+      </div>
+      <div className="relative mt-1.5 h-1.5 rounded-full bg-sidebar-foreground/10">
+        <div
+          className={`h-full rounded-full transition-[width] duration-500 ${low ? 'animate-pulse' : ''}`}
+          style={{
+            background: low ? DANGER : need.color,
+            boxShadow: `0 0 10px ${low ? DANGER : need.color}4d`,
+            width: `${pct}%`,
+          }}
+        />
+        <span
+          className="absolute -top-[3px] h-3 w-0.5 rounded-full bg-sidebar-foreground/25"
+          style={{ left: `${NOTCH * 100}%` }}
+        />
+      </div>
+    </div>
+  )
+}
+
+function MicroHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="mt-4 mb-2 px-0.5 font-mono text-[10px] text-sidebar-foreground/45 uppercase tracking-[0.12em]">
+      {children}
+    </p>
+  )
+}
+
+function commitPetName(pet: PetNode, next: string): void {
+  const name = next.trim()
+  if (!name || name === pet.name) return
+  useScene.getState().updateNode(pet.id as AnyNodeId, { name } as never)
+}
+
+function focusPet(pet: PetNode): void {
+  useViewer.getState().setSelection({ selectedIds: [pet.id as AnyNodeId] })
+}
+
+/** The selected pet: growth ring, mood, every need, and the care grid. */
+function PetCard({
+  now,
+  pet,
+  poopCount,
+  renaming,
+  setRenaming,
+}: {
+  now: number
+  pet: PetNode
+  poopCount: number
+  renaming: boolean
+  setRenaming: (id: string | null) => void
+}) {
+  const [coolUntil, setCoolUntil] = useState<Partial<Record<NeedKey, number>>>({})
+  const [gains, setGains] = useState<{ id: number; need: NeedKey; text: string }[]>([])
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([])
+  useEffect(
+    () => () => {
+      for (const timer of timers.current) clearTimeout(timer)
+    },
+    [],
+  )
+
+  const stage = lifeStageOf(pet, now)
+  const hygiene = hygieneOf(poopCount)
+  const values = needValues(pet, hygiene)
+  const mood = moodOf(pet, hygiene)
+  const lowest = Math.min(...NEEDS.map((need) => values[need.key]))
+  const tone = moodTone(mood, lowest)
+  const colors = genomeColors(pet.genome)
+
+  const later = (run: () => void, ms: number) => {
+    timers.current.push(setTimeout(run, ms))
+  }
+
+  const care = (need: NeedDef) => {
+    let gain: string | null = null
+    if (need.key === 'fullness') {
+      feedPet(pet.id)
+      // applyCare(…, 'eat'): +0.5 fullness once the plate is licked clean.
+      gain = '+50'
+    } else if (need.key === 'happiness') {
+      patPet(pet.id)
+      // applyCare(…, 'pat')
+      gain = '+15'
+    } else if (need.key === 'energy') {
+      restPet(pet.id)
+      // The wake-up bonus the sim pays when a nap ends (system.tsx).
+      gain = '+25'
+    } else {
+      // Hygiene is 1 − droppings/5, so every dropping scooped is worth 20.
+      const scooped = washPet(pet.id)
+      gain = scooped > 0 ? `+${Math.min(100, scooped * 20)}` : null
+    }
+    if (gain) {
+      const id = ++gainSeq
+      const text = gain
+      setGains((current) => [...current, { id, need: need.key, text }])
+      later(() => setGains((current) => current.filter((entry) => entry.id !== id)), 900)
+    }
+    setCoolUntil((current) => ({ ...current, [need.key]: Date.now() + COOLDOWN_MS }))
+    later(() => {
+      setCoolUntil((current) => {
+        const next = { ...current }
+        delete next[need.key]
+        return next
+      })
+    }, COOLDOWN_MS)
+  }
+
+  return (
+    <article className="pets-flash rounded-xl border border-sidebar-border/60 bg-sidebar-accent/30 p-4">
+      <div className="flex items-center gap-4">
+        <GrowthRing progress={ringProgress(pet, now)} stage={stage} tint={colors.body}>
+          {stage === 'egg' ? (
+            <EggAvatar genome={pet.genome} size={62} />
+          ) : (
+            <PetAvatar genome={pet.genome} size={62} />
+          )}
+        </GrowthRing>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1">
+            {renaming ? (
+              <input
+                autoFocus
+                className="min-w-0 flex-1 rounded border border-sidebar-border/60 bg-sidebar-accent/40 px-1.5 py-0.5 text-sm outline-none"
+                defaultValue={pet.name}
+                onBlur={(e) => {
+                  commitPetName(pet, e.currentTarget.value)
+                  setRenaming(null)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    commitPetName(pet, e.currentTarget.value)
+                    setRenaming(null)
+                  }
+                  if (e.key === 'Escape') {
+                    // Put the old name back first: the blur that follows would
+                    // otherwise commit whatever was typed.
+                    e.currentTarget.value = pet.name
+                    setRenaming(null)
+                  }
+                }}
+              />
+            ) : (
+              <button
+                className="min-w-0 flex-1 truncate text-left text-[19px] leading-tight hover:underline"
+                onClick={() => setRenaming(pet.id)}
+                style={{ fontFamily: DISPLAY_FONT }}
+                title="Rename"
+                type="button"
+              >
+                {pet.name}
+              </button>
+            )}
+            <button
+              className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-transparent text-sidebar-foreground/55 transition-colors hover:border-sidebar-border/60 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
+              onClick={() => focusPet(pet)}
+              title={`Focus the camera on ${pet.name}`}
+              type="button"
+            >
+              <CrosshairGlyph />
+            </button>
+          </div>
+          <p className="mt-1 text-[11px] text-sidebar-foreground/50">
+            {stage === 'egg' ? (
+              hatchCountdown(pet, now)
+            ) : stage === 'baby' ? (
+              <>
+                Baby ·{' '}
+                <span className="font-mono tabular-nums">
+                  {Math.round(growthOf(pet, now) * 100)}%
+                </span>{' '}
+                grown
+              </>
+            ) : (
+              'Adult · fully grown'
+            )}
+          </p>
+          {stage !== 'egg' && (
+            <span
+              className="mt-2 inline-flex items-center gap-1.5 text-[12px]"
+              style={tone === 'bad' ? { color: DANGER } : undefined}
+            >
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{
+                  background: tone === 'bad' ? DANGER : tone === 'mid' ? NEUTRAL : EMERALD,
+                }}
+              />
+              {sentence(mood)}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {stage === 'egg' ? (
+        <p className="mt-3 text-[11px] text-sidebar-foreground/50 leading-relaxed">
+          Still an egg — it wiggles, then hatches on its own.
+        </p>
+      ) : (
+        <>
+          <MicroHeading>Needs</MicroHeading>
+          {NEEDS.map((need) => (
+            <NeedRow
+              gains={gains.filter((gain) => gain.need === need.key)}
+              key={need.key}
+              need={need}
+              value={values[need.key]}
+            />
+          ))}
+
+          <MicroHeading>Care</MicroHeading>
+          <div className="grid grid-cols-2 gap-2">
+            {NEEDS.map((need) => {
+              const until = coolUntil[need.key]
+              const nothingToClean = need.key === 'hygiene' && poopCount === 0
+              return (
+                <button
+                  className="relative flex h-12 items-center gap-2.5 overflow-hidden rounded-xl border border-sidebar-border/60 bg-sidebar-foreground/[0.04] px-3 transition-colors hover:bg-sidebar-accent/60 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-sidebar-foreground/[0.04]"
+                  disabled={until != null || nothingToClean}
+                  key={need.key}
+                  onClick={() => care(need)}
+                  title={nothingToClean ? 'Nothing to clean up nearby' : need.hint}
+                  type="button"
+                >
+                  <span
+                    className="grid h-7 w-7 shrink-0 place-items-center rounded-lg"
+                    style={{ background: `${need.color}29`, color: need.color }}
+                  >
+                    <NeedGlyph need={need.key} />
+                  </span>
+                  <span className="font-medium text-[13px]">{need.action}</span>
+                  {until != null && (
+                    <span
+                      className="pets-cooldown absolute inset-x-0 bottom-0 h-0.5 origin-left"
+                      key={until}
+                      style={{ animationDuration: `${COOLDOWN_MS}ms`, background: need.color }}
+                    />
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </>
+      )}
+    </article>
+  )
+}
+
+/** Everyone else: one compact row, four dots for the four needs. */
+function PetRow({
+  now,
+  onSelect,
+  pet,
+  poopCount,
+}: {
+  now: number
+  onSelect: () => void
+  pet: PetNode
+  poopCount: number
+}) {
+  const stage = lifeStageOf(pet, now)
+  const hygiene = hygieneOf(poopCount)
+  const values = needValues(pet, hygiene)
+  const mood = moodOf(pet, hygiene)
+
+  return (
+    <button
+      className="flex w-full items-center gap-2.5 rounded-xl border border-sidebar-border/60 px-3 py-2.5 text-left transition-colors hover:border-sidebar-border hover:bg-sidebar-accent/50"
+      onClick={onSelect}
+      title={`Show ${pet.name}`}
+      type="button"
+    >
+      <span className="shrink-0">
+        {stage === 'egg' ? (
+          <EggAvatar genome={pet.genome} size={30} />
+        ) : (
+          <PetAvatar genome={pet.genome} size={30} />
+        )}
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate text-[13px]" style={{ fontFamily: DISPLAY_FONT }}>
+          {pet.name}
+        </span>
+        <span className="block text-[11px] text-sidebar-foreground/50">
+          {stage === 'egg' ? hatchCountdown(pet, now) : `${stageWord(stage)} · ${sentence(mood)}`}
+        </span>
+      </span>
+      {stage !== 'egg' && (
+        <span className="ml-auto flex shrink-0 gap-1">
+          {NEEDS.map((need) => (
+            <span
+              className="h-1.5 w-1.5 rounded-full"
+              key={need.key}
+              style={{ background: statusColor(values[need.key], need.color) }}
+              title={`${need.label} ${Math.round(values[need.key] * 100)}%`}
+            />
+          ))}
+        </span>
+      )}
+    </button>
+  )
 }
 
 function RosterTab({
@@ -217,17 +730,22 @@ function RosterTab({
   pets: PetNode[]
   poops: PoopNode[]
 }) {
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
+  const draftGenome = usePets((s) => s.draftGenome)
 
   if (pets.length === 0) {
     return (
-      <div className="flex flex-col gap-2 rounded-lg border border-sidebar-border/60 border-dashed p-4 text-center">
-        <p className="text-sidebar-foreground/60 text-xs leading-relaxed">
-          No pets yet. Roll some DNA and place an egg — it hatches into a creature that lives in
-          your house.
+      <div className="flex flex-col items-center gap-3 rounded-xl border border-sidebar-border/60 border-dashed p-6 text-center">
+        <EggAvatar genome={draftGenome} size={56} />
+        <p className="text-[13px]" style={{ fontFamily: DISPLAY_FONT }}>
+          No pets in the house yet
+        </p>
+        <p className="text-[11px] text-sidebar-foreground/50 leading-relaxed">
+          Roll some DNA and place an egg — it hatches into a creature that lives in your house.
         </p>
         <button
-          className="mx-auto rounded-full bg-primary px-3 py-1.5 font-medium text-primary-foreground text-xs"
+          className="rounded-full bg-primary px-3.5 py-1.5 font-medium text-primary-foreground text-xs"
           onClick={onHatch}
           type="button"
         >
@@ -237,24 +755,41 @@ function RosterTab({
     )
   }
 
+  // The first pet is the default subject; clicking any row promotes it.
+  const selected = pets.find((pet) => pet.id === selectedId) ?? pets[0]
+
   return (
     <div className="flex flex-col gap-2">
+      <style>{ROSTER_CSS}</style>
+      {pets.map((pet) =>
+        pet.id === selected?.id ? (
+          <PetCard
+            key={pet.id}
+            now={now}
+            pet={pet}
+            poopCount={nearbyPoopCount(pet, poops)}
+            renaming={renaming === pet.id}
+            setRenaming={setRenaming}
+          />
+        ) : (
+          <PetRow
+            key={pet.id}
+            now={now}
+            onSelect={() => {
+              setSelectedId(pet.id)
+              setRenaming(null)
+            }}
+            pet={pet}
+            poopCount={nearbyPoopCount(pet, poops)}
+          />
+        ),
+      )}
       {poops.length > 0 && (
-        <p className="rounded-lg border border-sidebar-border/60 border-dashed px-3 py-2 text-[11px] text-sidebar-foreground/60 leading-relaxed">
+        <p className="px-1 text-[11px] text-sidebar-foreground/45 leading-relaxed">
           💩 {poops.length} dropping{poops.length === 1 ? '' : 's'} to clean — click{' '}
-          {poops.length === 1 ? 'it' : 'them'} in the scene to scoop.
+          {poops.length === 1 ? 'it' : 'them'} in the scene, or use Wash.
         </p>
       )}
-      {pets.map((pet) => (
-        <PetRow
-          key={pet.id}
-          now={now}
-          pet={pet}
-          poops={poops}
-          renaming={renaming === pet.id}
-          setRenaming={setRenaming}
-        />
-      ))}
     </div>
   )
 }
