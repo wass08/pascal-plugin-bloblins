@@ -52,6 +52,13 @@ export type PetRuntime = {
 
 export const petRuntimes = new Map<string, PetRuntime>()
 
+/**
+ * Pets currently under the user's pointer-hold (pressed, maybe about to be
+ * dragged). The renderer adds on pointerdown and clears on the next global
+ * pointerup; the sim freezes a held pet so it can't walk out of your hand.
+ */
+export const heldPets = new Set<string>()
+
 export function ensureRuntime(id: string, home: [number, number]): PetRuntime {
   let runtime = petRuntimes.get(id)
   if (!runtime) {

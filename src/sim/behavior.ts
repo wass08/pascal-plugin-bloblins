@@ -4,7 +4,7 @@ import { moodOf } from './stats'
 
 export const ARRIVE_DIST = 0.35
 /** Plates are eaten from BESIDE, not from inside — arrive at munching range. */
-export const BOWL_ARRIVE = 0.55
+export const BOWL_ARRIVE = 0.45
 
 export type BehaviorContext = {
   now: number

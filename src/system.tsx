@@ -20,7 +20,7 @@ import { ARRIVE_DIST, type BehaviorContext, BOWL_ARRIVE, stepBehavior } from './
 import { furnitureKindOf } from './sim/furniture'
 import { catchUpStats, hygieneOf, moodOf } from './sim/stats'
 import { type ObstacleProbe, stepSteering } from './sim/steering'
-import { ensureRuntime, type PetRuntime, petRuntimes, usePets } from './store'
+import { ensureRuntime, heldPets, type PetRuntime, petRuntimes, usePets } from './store'
 
 const LEASH_RADIUS = 8
 const PET_RADIUS = 0.22
@@ -306,6 +306,27 @@ export default function PetsSystem() {
       usePets.getState().bumpSimTick()
     }
 
+    // Demo hook: ?pets=tired (or hungry / sad, comma-separable) floors the
+    // matching stat on every hatched pet so the behavior shows immediately.
+    const forced = new URLSearchParams(window.location.search).get('pets')
+    if (forced) {
+      const flags = new Set(forced.split(','))
+      const patch: Partial<PetNode> = {}
+      if (flags.has('tired')) patch.energy = 0.05
+      if (flags.has('hungry')) patch.fullness = 0.05
+      if (flags.has('sad')) patch.happiness = 0.05
+      if (Object.keys(patch).length > 0) {
+        const forcedUpdates: { id: AnyNodeId; data: Partial<PetNode> }[] = []
+        for (const node of Object.values(scene.nodes)) {
+          if ((node as { type?: string }).type !== 'pets:pet') continue
+          const pet = node as unknown as PetNode
+          if (pet.hatchedAt == null) continue
+          forcedUpdates.push({ id: pet.id as AnyNodeId, data: patch })
+        }
+        if (forcedUpdates.length > 0) scene.updateNodes(forcedUpdates as never)
+      }
+    }
+
     const flush = () => commitStats()
     window.addEventListener('beforeunload', flush)
     return () => window.removeEventListener('beforeunload', flush)
@@ -392,7 +413,9 @@ export default function PetsSystem() {
         rt.pos[1] = liveOverride.position[2]
       }
       const dragging =
-        liveOverride?.position != null || now - (homeMovedAt.current.get(pet.id) ?? 0) < 600
+        heldPets.has(pet.id) ||
+        liveOverride?.position != null ||
+        now - (homeMovedAt.current.get(pet.id) ?? 0) < 600
       const selected = selectedIds.has(pet.id) || movingId === pet.id || dragging
       if (selected) {
         if (!prevSelected.current.has(pet.id)) {

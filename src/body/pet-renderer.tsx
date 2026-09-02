@@ -19,7 +19,7 @@ import { patPet } from '../interaction'
 import { memberElevation } from '../pet/elevation'
 import { EGG_HATCH_MS, growthOf, type PetNode, type PoopNode } from '../schema'
 import { hygieneOf, moodOf } from '../sim/stats'
-import { type Mood, petRuntimes } from '../store'
+import { heldPets, type Mood, petRuntimes } from '../store'
 import type { BodyPart } from './body-spec'
 import { buildBodySpec } from './build-body'
 import EggBody, { EGG_HEIGHT } from './egg'
@@ -424,6 +424,12 @@ export default function PetRenderer({ node }: { node: PetNode }) {
           onClick={(event) => {
             event.stopPropagation()
             patPet(node.id)
+          }}
+          onPointerDown={() => {
+            // Grabbed (maybe about to be dragged): hold still until release —
+            // the host sets no drag state during the initial press-and-hold.
+            heldPets.add(node.id)
+            window.addEventListener('pointerup', () => heldPets.delete(node.id), { once: true })
           }}
           ref={pose}
         >

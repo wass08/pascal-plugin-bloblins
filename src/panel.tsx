@@ -992,13 +992,15 @@ function ChipRow<T extends string>({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-1">
-      <span className="mr-0.5 text-[10px] text-sidebar-foreground/50">{label}</span>
+      <span className="mr-0.5 w-11 shrink-0 font-mono text-[10px] text-sidebar-foreground/40 uppercase tracking-wide">
+        {label}
+      </span>
       {options.map((option) => (
         <button
-          className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
+          className={`rounded-lg border px-2.5 py-1 font-medium text-[11px] transition-colors ${
             option === value
-              ? 'border-sidebar-ring bg-sidebar-accent text-sidebar-foreground'
-              : 'border-sidebar-border/60 text-sidebar-foreground/60 hover:bg-sidebar-accent/60'
+              ? 'border-sidebar-border/60 bg-sidebar-accent text-sidebar-foreground shadow-sm'
+              : 'border-transparent text-sidebar-foreground/55 hover:text-sidebar-foreground'
           }`}
           key={option}
           onClick={() => onChange(option)}
@@ -1013,7 +1015,7 @@ function ChipRow<T extends string>({
 
 function GroupHeading({ children }: { children: React.ReactNode }) {
   return (
-    <p className="font-semibold text-[10px] text-sidebar-foreground/70 uppercase tracking-wider">
+    <p className="font-mono text-[10px] text-sidebar-foreground/50 uppercase tracking-[0.12em]">
       {children}
     </p>
   )
