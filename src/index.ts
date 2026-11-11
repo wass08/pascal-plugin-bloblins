@@ -2,15 +2,16 @@ import type { AnyNodeDefinition, Plugin } from '@pascal-app/core'
 import { bowlDefinition } from './bowl/definition'
 import { petDefinition } from './pet/definition'
 import { poopDefinition } from './poop/definition'
+import { petsRenderPlugin } from './render'
 
 /**
  * The Pets plugin manifest — procedural tamagotchi-style companions that live
  * in the house you're building. Loaded by hosts through the same `loadPlugin`
- * path as the built-ins.
+ * path as the built-ins. Each kind composes its render half (also served alone
+ * as `petsRenderPlugin` from `./render`) with its editing contribution.
  */
 export const petsPlugin: Plugin = {
-  id: 'wass08:pets',
-  apiVersion: 1,
+  ...petsRenderPlugin,
   nodes: [
     petDefinition as unknown as AnyNodeDefinition,
     bowlDefinition as unknown as AnyNodeDefinition,

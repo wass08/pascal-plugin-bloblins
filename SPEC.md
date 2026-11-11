@@ -227,6 +227,17 @@ verbatim from `@pascal-app/plugin-bones/src/placement.tsx`; tool commits
 Manifest `petsPlugin` (id `wass08:pets`, apiVersion 1, 3 nodes) + `petsHostPanel`
 (icon `lucide:paw-print`, `defaultInstalled: false`).
 
+### `render.ts` and the definition split
+Each kind has `definition.render.ts` (schema, defaults, capabilities,
+renderer, the pet system, `bake: 'strip'`, presentation), `definition.edit.ts`
+(`snapProfile`, `keyboardActions`, and for pets the tool, preview and a system
+wrapper) and a composing `definition.ts`. `render.ts` exports
+`petsRenderPlugin` (same id, kinds and render halves) for read-only viewers;
+nothing reachable from it may import `@pascal-app/editor` or `next`
+(`bun run check:render`). The sim reads the move tool's carried node through
+`host.ts`'s `movingNodeId()`; `system.edit.ts` plugs the editor's
+`getMovingNode` into it, so render-only hosts simply carry nothing.
+
 ## Rules
 
 - Peer-import `@pascal-app/{core,editor,viewer}`, react, three, zod, zustand —
