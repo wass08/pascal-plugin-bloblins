@@ -7,14 +7,13 @@ import {
   useLiveNodeOverrides,
   useScene,
 } from '@pascal-app/core'
-import { getMovingNode } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
 import { Box3, Raycaster, Vector3 } from 'three'
 import { eggWiggleTick, hatchFanfare, munch, petChirp, petSong } from './audio'
 import { voiceOf } from './genome'
-import { isReadOnlyHost } from './host'
+import { isReadOnlyHost, movingNodeId } from './host'
 import { type BowlNode, EGG_HATCH_MS, lifeStageOf, type PetNode, PoopNode } from './schema'
 import { ARRIVE_DIST, type BehaviorContext, BOWL_ARRIVE, stepBehavior } from './sim/behavior'
 import { furnitureKindOf } from './sim/furniture'
@@ -407,11 +406,9 @@ export default function PetsSystem() {
     const selectedIds = new Set(useViewer.getState().selection.selectedIds as readonly string[])
     const liveOverrides = useLiveNodeOverrides.getState()
     // A pet being carried by the move tool freezes like a selected one. The
-    // moving node lives in the host's dedicated interaction-scope store —
-    // useEditor has no such field (it silently read undefined for weeks).
-    const movingId: string | null =
-      (typeof getMovingNode === 'function' ? (getMovingNode()?.id as string | undefined) : null) ??
-      null
+    // moving node lives in the editor's interaction-scope store, which the
+    // editing half plugs into `host.ts`; render-only hosts carry nothing.
+    const movingId = movingNodeId()
 
     for (const node of Object.values(scene.nodes)) {
       if ((node as { type?: string }).type !== 'pets:pet') continue

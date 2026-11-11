@@ -1,8 +1,7 @@
 'use client'
 
 import { useRegistry, useScene } from '@pascal-app/core'
-import { EDITOR_LAYER } from '@pascal-app/editor'
-import { useNodeEvents } from '@pascal-app/viewer'
+import { OVERLAY_LAYER, useNodeEvents } from '@pascal-app/viewer'
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import {
@@ -110,8 +109,9 @@ function droopFor(mood: Mood): number {
  * so the cost of a pet is a handful of draw calls with plain standard
  * materials — the host renders through WebGPU, so no custom shaders anywhere.
  *
- * The emote bubble, hearts and tears live on `EDITOR_LAYER`, which the host
- * composites AFTER post-processing: on the scene layer the SSGI/AO/ink passes
+ * The emote bubble, hearts and tears live on the viewer's `OVERLAY_LAYER`
+ * (the editor's `EDITOR_LAYER` aliases it), which the host composites AFTER
+ * post-processing: on the scene layer the SSGI/AO/ink passes
  * treat a sprite as geometry and shade the bubble like a dark grey card.
  */
 export default function PetRenderer({ node }: { node: PetNode }) {
@@ -470,7 +470,7 @@ export default function PetRenderer({ node }: { node: PetNode }) {
           />
         )}
         <sprite
-          layers={EDITOR_LAYER}
+          layers={OVERLAY_LAYER}
           material={emoteMaterial('hearts')}
           position={[0, emoteY, 0]}
           raycast={NO_RAYCAST}
@@ -481,7 +481,7 @@ export default function PetRenderer({ node }: { node: PetNode }) {
         {HEART_SLOTS.map((slot) => (
           <sprite
             key={slot}
-            layers={EDITOR_LAYER}
+            layers={OVERLAY_LAYER}
             material={heartMaterial()}
             raycast={NO_RAYCAST}
             ref={(sprite) => {
@@ -494,7 +494,7 @@ export default function PetRenderer({ node }: { node: PetNode }) {
         {TEAR_SLOTS.map((slot) => (
           <sprite
             key={slot}
-            layers={EDITOR_LAYER}
+            layers={OVERLAY_LAYER}
             material={tearMaterial()}
             raycast={NO_RAYCAST}
             ref={(sprite) => {

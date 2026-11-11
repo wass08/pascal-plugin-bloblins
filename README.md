@@ -19,6 +19,22 @@ with the genome builder and the pet roster.
 - **Persisted project data**: pet DNA, name, care stats, and timestamps on
   `pets:*` nodes in the project's scene graph. Nothing leaves the project.
 
+## Read-only viewers
+
+Viewers that only display a scene can load the render-only manifest, which
+registers the same three kinds (schemas, renderers and the pet sim, so pets
+stay alive for visitors) without the editor's tools, keyboard actions or panel,
+and without importing `@pascal-app/editor`:
+
+```ts
+import { petsRenderPlugin } from '@wass08/plugin-bloblins/render'
+```
+
+Editors keep importing `petsPlugin` from the package root. Scene writes (stat
+commits, hatching, poop) are skipped while the scene store is read-only.
+`bun run check:render` bundles `./render` and fails if anything on it resolves
+to `@pascal-app/editor` or `next`.
+
 ## Architecture
 
 See [SPEC.md](./SPEC.md) for the module contracts (genome → procedural body,
@@ -35,4 +51,5 @@ Do not `bun install` inside this package while linked (see SPEC.md Rules).
 ```bash
 bun test          # from the host workspace root
 bun run check-types
+bun run check:render
 ```
